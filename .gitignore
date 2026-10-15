@@ -5,3 +5,4 @@ e2e/.tmp/
 *.log
 gen/*
 src-tauri/gen/schemas/
+docs/*
