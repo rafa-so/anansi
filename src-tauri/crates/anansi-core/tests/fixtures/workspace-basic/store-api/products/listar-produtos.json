@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "name": "Listar produtos",
+  "method": "GET",
+  "url": "{{baseUrlStore}}/products",
+  "query": [
+    {
+      "key": "page",
+      "value": "1",
+      "enabled": true
+    }
+  ]
+}

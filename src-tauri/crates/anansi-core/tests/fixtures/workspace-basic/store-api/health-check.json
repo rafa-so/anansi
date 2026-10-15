@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "name": "Health check",
+  "method": "GET",
+  "url": "{{baseUrlStore}}/health"
+}

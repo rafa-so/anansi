@@ -1,0 +1,11 @@
+---
+source: crates/anansi-core/src/curl/export.rs
+expression: e.curl
+---
+curl.exe -X POST '{{base_url_orders_api}}/orders?page=1&q=a%20b' `
+  -H 'x-api-key: {{x-api-key}}' `
+  -H 'Content-Type: application/json' `
+  --data-raw '{
+  "Id": "12345678",
+  "nome": "D''Ávila"
+}'

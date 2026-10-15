@@ -1,0 +1,7 @@
+node_modules/
+dist/
+src-tauri/target/
+e2e/.tmp/
+*.log
+gen/*
+src-tauri/gen/schemas/

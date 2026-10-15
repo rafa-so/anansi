@@ -1,0 +1,27 @@
+---
+source: tests/workspace_crud.rs
+expression: text
+---
+{
+  "schemaVersion": 1,
+  "name": "Listar Ações",
+  "method": "GET",
+  "url": "{{baseUrlStore}}/products",
+  "query": [
+    {
+      "key": "page",
+      "value": "1",
+      "enabled": true
+    }
+  ],
+  "headers": [
+    {
+      "key": "Authorization",
+      "value": "Bearer {{token}}",
+      "enabled": true
+    }
+  ],
+  "settings": {
+    "verifyTls": false
+  }
+}

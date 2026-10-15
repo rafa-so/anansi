@@ -1,0 +1,11 @@
+---
+source: crates/anansi-core/src/curl/export.rs
+expression: e.curl
+---
+curl -X POST 'http://localhost:8080/orders?page=1&q=a%20b' \
+  -H 'x-api-key: s3cr3t-123' \
+  -H 'Content-Type: application/json' \
+  --data-raw '{
+  "Id": "12345678",
+  "nome": "D'\''Ávila"
+}'

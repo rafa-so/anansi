@@ -1,0 +1,165 @@
+:root {
+  --bg: #ffffff;
+  --bg-soft: #f6f7f9;
+  --bg-muted: #eceef2;
+  --bg-hover: #e8ebf0;
+  --bg-selected: #dce6fb;
+  --border: #d9dde4;
+  --text: #1c2330;
+  --text-muted: #5d6675;
+  --accent: #1e3a8a;
+  --accent-text: #ffffff;
+  --danger: #b42318;
+  --warning-bg: #fff4d6;
+  --warning-text: #7a4b00;
+  --focus: #3b6fe0;
+  --m-get: #15803d;
+  --m-post: #b45309;
+  --m-put: #1d4ed8;
+  --m-patch: #7e22ce;
+  --m-delete: #b91c1c;
+  --m-other: #6b7280;
+  --radius: 6px;
+  --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --mono: 'Cascadia Mono', Consolas, 'SFMono-Regular', monospace;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17191d;
+    --bg-soft: #1d2025;
+    --bg-muted: #262a31;
+    --bg-hover: #2b3038;
+    --bg-selected: #23345c;
+    --border: #353a43;
+    --text: #e6e8ec;
+    --text-muted: #9aa3b2;
+    --accent: #4f7df0;
+    --accent-text: #ffffff;
+    --danger: #f97066;
+    --warning-bg: #3d3214;
+    --warning-text: #f5d58a;
+    --focus: #6f97f5;
+    --m-get: #4ade80;
+    --m-post: #fbbf24;
+    --m-put: #60a5fa;
+    --m-patch: #c084fc;
+    --m-delete: #f87171;
+    --m-other: #9ca3af;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  background: var(--accent);
+}
+
+button.danger {
+  color: var(--danger);
+}
+
+button.icon {
+  border: none;
+  background: transparent;
+  padding: 2px 6px;
+}
+
+input,
+select,
+textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.method {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.method-GET {
+  color: var(--m-get);
+}
+.method-POST {
+  color: var(--m-post);
+}
+.method-PUT {
+  color: var(--m-put);
+}
+.method-PATCH {
+  color: var(--m-patch);
+}
+.method-DELETE {
+  color: var(--m-delete);
+}
+.method-HEAD,
+.method-OPTIONS {
+  color: var(--m-other);
+}
+
+.muted {
+  color: var(--text-muted);
+}

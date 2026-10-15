@@ -1,0 +1,13 @@
+---
+source: tests/workspace_crud.rs
+expression: "read(&root, &rel)"
+---
+{
+  "schemaVersion": 1,
+  "name": "Criar produto",
+  "method": "POST",
+  "url": "{{baseUrlStore}}/products",
+  "body": {
+    "type": "json"
+  }
+}
