@@ -3,7 +3,7 @@
 use crate::env::resolver::{Report, Resolver};
 use crate::env::EnvironmentData;
 use crate::http::{automatic_content_type, encode_form};
-use crate::model::{Body, HttpMethod, KeyValue, RequestFile};
+use crate::model::{Body, FormField, HttpMethod, KeyValue, RequestFile};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +64,21 @@ fn url_with_query(url: &str, query: &[KeyValue]) -> String {
     format!("{url}{sep}{}", pairs.join("&"))
 }
 
+/// Campo de `multipart`: texto com `--form-string` (sem interpretar `@`/`<`), arquivo com `-F nome=@"caminho"`.
+fn form_arg(field: &FormField, format: CurlFormat) -> String {
+    if !field.is_file() {
+        return format!(
+            "--form-string {}",
+            quote(&format!("{}={}", field.key, field.value), format)
+        );
+    }
+    let path = field.value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        "-F {}",
+        quote(&format!("{}=@\"{path}\"", field.key), format)
+    )
+}
+
 /// Gera o comando. Com `resolve`, substitui variáveis e segredos do ambiente.
 pub fn export(
     request: &RequestFile,
@@ -86,9 +101,12 @@ pub fn export(
         copy
     };
 
+    let multipart = source.body.has_files();
     let body: Option<String> = match &source.body {
         Body::None => None,
         Body::Json { content } | Body::Text { content } => Some(content.clone()),
+        // Multipart sai como -F (abaixo); o curl gera o Content-Type com boundary.
+        Body::FormUrlencoded { .. } if multipart => None,
         Body::FormUrlencoded { fields } => Some(encode_form(fields)),
     };
 
@@ -97,7 +115,7 @@ pub fn export(
         CurlFormat::Bash => "curl".to_string(),
         CurlFormat::Powershell => "curl.exe".to_string(),
     };
-    if !(source.method == HttpMethod::Get && body.is_none()) {
+    if !(source.method == HttpMethod::Get && body.is_none() && !multipart) {
         first.push_str(&format!(" -X {}", source.method.as_str()));
     }
     first.push_str(&format!(
@@ -118,7 +136,7 @@ pub fn export(
         };
         args.push(format!("-H {}", quote(&line, format)));
     }
-    if let Some(ct) = automatic_content_type(&source.body) {
+    if let Some(ct) = automatic_content_type(&source.body).filter(|_| !multipart) {
         if !headers
             .iter()
             .any(|h| h.key.eq_ignore_ascii_case("content-type"))
@@ -134,6 +152,16 @@ pub fn export(
     }
     if let Some(b) = body {
         args.push(format!("--data-raw {}", quote(&b, format)));
+    }
+    if let Body::FormUrlencoded { fields } = &source.body {
+        if multipart {
+            args.extend(
+                fields
+                    .iter()
+                    .filter(|f| f.enabled)
+                    .map(|f| form_arg(f, format)),
+            );
+        }
     }
 
     let continuation = match format {
@@ -265,14 +293,49 @@ mod tests {
     }
 
     #[test]
+    fn form_with_file_is_exported_as_multipart() {
+        let mut r = request();
+        r.headers.clear();
+        r.body = Body::FormUrlencoded {
+            fields: vec![
+                FormField::text("nome", "@Ana"),
+                FormField::file("doc", r#"C:\docs\"x".pdf"#),
+                FormField {
+                    enabled: false,
+                    ..FormField::file("off", "/tmp/y")
+                },
+            ],
+        };
+        let curl = export(&r, None, false, CurlFormat::Bash).curl;
+        assert!(
+            !curl.contains("Content-Type"),
+            "o curl gera o Content-Type com boundary"
+        );
+        assert!(!curl.contains("--data-raw"));
+        assert!(curl.contains("--form-string 'nome=@Ana'"));
+        assert!(
+            curl.ends_with(r#"-F 'doc=@"C:\\docs\\\"x\".pdf"'"#),
+            "{curl}"
+        );
+        assert!(!curl.contains("off"));
+        let back = crate::curl::import::import(&curl).unwrap().request;
+        assert_eq!(
+            back.body,
+            Body::FormUrlencoded {
+                fields: vec![
+                    FormField::text("nome", "@Ana"),
+                    FormField::file("doc", r#"C:\docs\"x".pdf"#),
+                ]
+            },
+            "ida e volta pelo cURL preserva os campos"
+        );
+    }
+
+    #[test]
     fn form_body_is_encoded() {
         let mut r = request();
         r.body = Body::FormUrlencoded {
-            fields: vec![KeyValue {
-                key: "a".into(),
-                value: "1 2".into(),
-                enabled: true,
-            }],
+            fields: vec![FormField::text("a", "1 2")],
         };
         let curl = export(&r, None, false, CurlFormat::Bash).curl;
         assert!(curl.contains("-H 'Content-Type: application/x-www-form-urlencoded'"));

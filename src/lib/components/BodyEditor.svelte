@@ -1,6 +1,7 @@
 <script lang="ts">
   // Editor do body (RF-09): JSON e texto no CodeMirror, form-urlencoded em tabela.
-  import { changeBodyType, formatJson, jsonProblem } from '../request';
+  // Campos do formulário podem ser texto ou arquivo; com arquivo, o envio é multipart/form-data.
+  import { changeBodyType, formatJson, hasFiles, jsonProblem } from '../request';
   import type { Body, BodyType } from '../types';
   import CodeEditor from './CodeEditor.svelte';
   import KeyValueTable from './KeyValueTable.svelte';
@@ -54,7 +55,20 @@
     </div>
     {#if jsonError}<p class="warning" role="status">JSON possivelmente inválido: {jsonError}</p>{/if}
   {:else if body.type === 'form-urlencoded'}
-    <KeyValueTable bind:items={body.fields} label="Campos do formulário" keyPlaceholder="Campo" {known} />
+    <div class="form">
+      <KeyValueTable
+        bind:items={body.fields}
+        label="Campos do formulário"
+        keyPlaceholder="Campo"
+        {known}
+        fileFields
+      />
+      {#if hasFiles(body)}
+        <p class="muted" data-testid="multipart-hint">
+          Com arquivo, o body é enviado como <span class="mono">multipart/form-data</span>.
+        </p>
+      {/if}
+    </div>
   {:else}
     <p class="muted">Este request não envia body.</p>
   {/if}
@@ -81,6 +95,9 @@
   }
   .format {
     margin-left: auto;
+  }
+  .form p {
+    margin: 6px 0 0;
   }
   .code {
     min-height: 160px;

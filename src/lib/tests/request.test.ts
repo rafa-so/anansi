@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  automaticContentType,
   changeBodyType,
+  fileName,
   forSave,
+  hasFiles,
   isDirty,
   moveQueryFromUrl,
   newRequest,
@@ -160,5 +163,56 @@ describe('formatJson', () => {
 
   it('devolve null para JSON inválido', () => {
     expect(formatJson('{')).toBeNull();
+  });
+});
+
+describe('campos de arquivo no formulário', () => {
+  const form = (fields: { key: string; value: string; enabled: boolean; type?: 'text' | 'file' }[]) =>
+    ({ type: 'form-urlencoded', fields }) as const;
+
+  it('só vira multipart com arquivo habilitado', () => {
+    expect(hasFiles(form([{ key: 'a', value: '1', enabled: true }]))).toBe(false);
+    expect(hasFiles(form([{ key: 'f', value: '/x.png', enabled: false, type: 'file' }]))).toBe(false);
+    expect(hasFiles(form([{ key: 'f', value: '/x.png', enabled: true, type: 'file' }]))).toBe(true);
+    expect(hasFiles({ type: 'json', content: '{}' })).toBe(false);
+  });
+
+  it('informa o Content-Type automático de cada tipo de body', () => {
+    expect(automaticContentType({ type: 'none' })).toBeNull();
+    expect(automaticContentType({ type: 'json', content: '' })).toBe('application/json');
+    expect(automaticContentType(form([]))).toBe('application/x-www-form-urlencoded');
+    expect(automaticContentType(form([{ key: 'f', value: 'x', enabled: true, type: 'file' }]))).toBe(
+      'multipart/form-data',
+    );
+  });
+
+  it('ao salvar, grava o tipo só nos campos de arquivo', () => {
+    const r: RequestFile = {
+      ...base(),
+      body: form([
+        { key: 'a', value: '1', enabled: true, type: 'text' },
+        { key: 'f', value: 'C:\\docs\\a.pdf', enabled: true, type: 'file' },
+      ]),
+    };
+    expect(forSave(r).body).toEqual(
+      form([
+        { key: 'a', value: '1', enabled: true },
+        { key: 'f', value: 'C:\\docs\\a.pdf', enabled: true, type: 'file' },
+      ]),
+    );
+  });
+
+  it('trocar um campo para arquivo deixa o request alterado', () => {
+    const saved: RequestFile = { ...base(), body: form([{ key: 'f', value: '', enabled: true }]) };
+    const draft: RequestFile = {
+      ...base(),
+      body: form([{ key: 'f', value: '', enabled: true, type: 'file' }]),
+    };
+    expect(isDirty(saved, draft)).toBe(true);
+  });
+
+  it('extrai o nome do arquivo de caminhos Windows e POSIX', () => {
+    expect(fileName('C:\\docs\\cv.pdf')).toBe('cv.pdf');
+    expect(fileName('/home/ana/foto.png')).toBe('foto.png');
   });
 });

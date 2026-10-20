@@ -6,3 +6,5 @@ e2e/.tmp/
 gen/*
 src-tauri/gen/schemas/
 docs/*
+.github/*
+CLAUDE.md

@@ -46,6 +46,56 @@ fn default_true() -> bool {
     true
 }
 
+/// Tipo de um campo do formulário: texto (padrão) ou arquivo.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FieldKind {
+    #[default]
+    Text,
+    File,
+}
+
+impl FieldKind {
+    pub fn is_text(&self) -> bool {
+        matches!(self, FieldKind::Text)
+    }
+}
+
+/// Campo do body de formulário. No tipo `file`, o `value` é o caminho do arquivo local.
+///
+/// O `type` só é gravado para arquivos, então os requests antigos continuam iguais.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormField {
+    pub key: String,
+    pub value: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(rename = "type", default, skip_serializing_if = "FieldKind::is_text")]
+    pub kind: FieldKind,
+}
+
+impl FormField {
+    pub fn text(key: &str, value: &str) -> Self {
+        FormField {
+            key: key.into(),
+            value: value.into(),
+            enabled: true,
+            kind: FieldKind::Text,
+        }
+    }
+
+    pub fn file(key: &str, path: &str) -> Self {
+        FormField {
+            kind: FieldKind::File,
+            ..FormField::text(key, path)
+        }
+    }
+
+    pub fn is_file(&self) -> bool {
+        self.kind == FieldKind::File
+    }
+}
+
 /// Configurações por request. `None` = usa o padrão das preferências globais.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,13 +130,21 @@ pub enum Body {
     },
     FormUrlencoded {
         #[serde(default)]
-        fields: Vec<KeyValue>,
+        fields: Vec<FormField>,
     },
 }
 
 impl Body {
     pub fn is_none(&self) -> bool {
         matches!(self, Body::None)
+    }
+
+    /// Formulário com algum campo de arquivo habilitado: é enviado como `multipart/form-data`.
+    pub fn has_files(&self) -> bool {
+        match self {
+            Body::FormUrlencoded { fields } => fields.iter().any(|f| f.enabled && f.is_file()),
+            _ => false,
+        }
     }
 }
 
@@ -123,7 +181,7 @@ pub enum DiskBody {
     Text,
     FormUrlencoded {
         #[serde(default)]
-        fields: Vec<KeyValue>,
+        fields: Vec<FormField>,
     },
 }
 
@@ -278,11 +336,10 @@ mod tests {
 
     #[test]
     fn form_body_stays_inline() {
-        let fields = vec![KeyValue {
-            key: "a".into(),
-            value: "1".into(),
-            enabled: true,
-        }];
+        let fields = vec![
+            FormField::text("a", "1"),
+            FormField::file("anexo", "C:/docs/a.pdf"),
+        ];
         let (disk, file) = sample(Body::FormUrlencoded {
             fields: fields.clone(),
         })
@@ -333,6 +390,43 @@ mod tests {
         assert_eq!(json["schemaVersion"], 1);
         assert!(json.get("query").is_none(), "lista vazia é omitida");
         assert!(json.get("settings").is_none(), "settings padrão é omitido");
+    }
+
+    #[test]
+    fn form_field_type_is_only_written_for_files() {
+        let json = serde_json::to_value(vec![
+            FormField::text("a", "1"),
+            FormField::file("b", "/tmp/x.png"),
+        ])
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!([
+                { "key": "a", "value": "1", "enabled": true },
+                { "key": "b", "value": "/tmp/x.png", "enabled": true, "type": "file" }
+            ])
+        );
+        let old: FormField = serde_json::from_str(r#"{"key":"a","value":"1"}"#).unwrap();
+        assert_eq!(
+            old,
+            FormField::text("a", "1"),
+            "campo antigo, sem type, é texto"
+        );
+    }
+
+    #[test]
+    fn has_files_only_counts_enabled_file_fields() {
+        let mut off = FormField::file("b", "x");
+        off.enabled = false;
+        assert!(!Body::FormUrlencoded {
+            fields: vec![FormField::text("a", "1"), off]
+        }
+        .has_files());
+        assert!(Body::FormUrlencoded {
+            fields: vec![FormField::file("b", "x")]
+        }
+        .has_files());
+        assert!(!Body::None.has_files());
     }
 
     #[test]

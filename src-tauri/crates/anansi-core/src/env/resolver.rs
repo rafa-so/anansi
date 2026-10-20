@@ -5,7 +5,7 @@
 //! - Fontes: variáveis e segredos do ambiente ativo; em nome duplicado, vale o segredo.
 
 use super::{is_valid_var_name, EnvironmentData};
-use crate::model::{Body, KeyValue, RequestFile};
+use crate::model::{Body, FormField, KeyValue, RequestFile};
 use std::collections::BTreeSet;
 
 /// Placeholder encontrado no texto: posição em bytes e nome.
@@ -100,6 +100,20 @@ impl<'a> Resolver<'a> {
             .collect()
     }
 
+    /// Como `resolve_list`, mantendo o tipo do campo (no arquivo, resolve o caminho).
+    fn resolve_form(&self, fields: &[FormField], report: &mut Report) -> Vec<FormField> {
+        fields
+            .iter()
+            .filter(|f| f.enabled)
+            .map(|f| FormField {
+                key: self.resolve(&f.key, report),
+                value: self.resolve(&f.value, report),
+                enabled: true,
+                kind: f.kind,
+            })
+            .collect()
+    }
+
     /// Resolve URL, query, headers e body (Seção 6.2). Itens desabilitados são descartados.
     pub fn resolve_request(&self, request: &RequestFile) -> (RequestFile, Report) {
         let mut report = Report::default();
@@ -115,7 +129,7 @@ impl<'a> Resolver<'a> {
                 content: self.resolve(content, &mut report),
             },
             Body::FormUrlencoded { fields } => Body::FormUrlencoded {
-                fields: self.resolve_list(fields, &mut report),
+                fields: self.resolve_form(fields, &mut report),
             },
             Body::None => Body::None,
         };

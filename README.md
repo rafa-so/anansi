@@ -81,6 +81,8 @@ A versão fica em `src-tauri/tauri.conf.json` e no `package.json`; atualize as d
 8. Alterações feitas por fora (git pull, editor) aparecem sozinhas. Se o watcher não perceber (ex.: unidade de rede), use ⟳ (Recarregar workspace).
 9. ⚙ (Preferências) define o padrão de verificação de TLS e o timeout. Cada request pode mudar isso na aba **Configurações**.
 
+No body **Form URL-encoded**, cada campo pode ser **Texto** ou **Arquivo** (coluna Tipo). No tipo Arquivo, "Escolher…" abre o seletor e o valor guarda o caminho do arquivo na sua máquina (aceita `{{nome}}`). Com algum arquivo habilitado, o request vai como `multipart/form-data` (o app gera o `boundary` e substitui o Content-Type dos headers) e o "Copiar como cURL" usa `-F`. Como o caminho é local, quem usar a collection em outra máquina precisa escolher o arquivo de novo ou usar uma variável de ambiente no caminho.
+
 O body JSON ou texto de um request fica num arquivo ao lado dele (`criar-produto.json` + `criar-produto.body.json`), para o diff no git sair linha a linha.
 
 "Copiar como cURL" tem duas variantes: com placeholders (`{{nome}}`), para compartilhar, e com valores, para rodar direto; esta pode conter segredos e o app avisa. O formato bash roda no Git Bash e no WSL; o PowerShell 7 usa `curl.exe` com crase de continuação (o Windows PowerShell 5.1 não é suportado, porque quebra as aspas do JSON).

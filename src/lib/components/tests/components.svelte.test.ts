@@ -6,7 +6,10 @@ import KeyValueTable from '../KeyValueTable.svelte';
 import ConfirmDialog from '../ConfirmDialog.svelte';
 import BodyEditor from '../BodyEditor.svelte';
 import { dialogs } from '../../state/dialogs.svelte';
-import type { Body, KeyValue, TreeNode as Node } from '../../types';
+import type { Body, FormField, KeyValue, TreeNode as Node } from '../../types';
+
+const dialogOpen = vi.hoisted(() => vi.fn());
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: dialogOpen, save: vi.fn() }));
 
 const node: Node = {
   kind: 'collection',
@@ -90,6 +93,53 @@ describe('KeyValueTable', () => {
   });
 });
 
+describe('KeyValueTable com campos de arquivo', () => {
+  it('só mostra a coluna de tipo quando pedido', () => {
+    const items: KeyValue[] = $state([{ key: 'a', value: '1', enabled: true }]);
+    render(KeyValueTable, { items, label: 'Headers' });
+    expect(screen.queryByTestId('kv-type')).toBeNull();
+  });
+
+  it('trocar para arquivo limpa o valor e escolhe o arquivo pelo diálogo', async () => {
+    const items: FormField[] = $state([{ key: 'foto', value: 'texto', enabled: true }]);
+    render(KeyValueTable, { items, label: 'Campos', fileFields: true });
+    await fireEvent.change(screen.getByTestId('kv-type'), { target: { value: 'file' } });
+    expect(items[0]).toEqual({ key: 'foto', value: '', enabled: true, type: 'file' });
+
+    dialogOpen.mockResolvedValueOnce('C:\\fotos\\eu.png');
+    await fireEvent.click(screen.getByTestId('kv-pick-file'));
+    await vi.waitFor(() => expect(items[0].value).toBe('C:\\fotos\\eu.png'));
+    expect(screen.getByLabelText('Arquivo 1')).toHaveValue('C:\\fotos\\eu.png');
+  });
+
+  it('a linha vazia também escolhe o tipo e cria o campo de arquivo', async () => {
+    const items: FormField[] = $state([]);
+    render(KeyValueTable, { items, label: 'Campos', keyPlaceholder: 'Campo', fileFields: true });
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByTestId('kv-new-type'), 'file');
+    await user.type(screen.getByLabelText('Adicionar campo'), 'foto');
+    expect(items).toEqual([{ key: 'foto', value: '', enabled: true, type: 'file' }]);
+    expect(screen.getByTestId('kv-new-type')).toHaveValue('text');
+
+    await user.selectOptions(screen.getByTestId('kv-new-type'), 'file');
+    dialogOpen.mockResolvedValueOnce('/docs/cv.pdf');
+    await user.click(screen.getByTestId('kv-new-pick-file'));
+    await vi.waitFor(() => expect(items).toHaveLength(2));
+    expect(items[1]).toEqual({ key: '', value: '/docs/cv.pdf', enabled: true, type: 'file' });
+  });
+
+  it('cancelar o diálogo mantém o arquivo atual; voltar para texto remove o tipo', async () => {
+    const items: FormField[] = $state([{ key: 'doc', value: '/a.pdf', enabled: true, type: 'file' }]);
+    render(KeyValueTable, { items, label: 'Campos', fileFields: true });
+    dialogOpen.mockResolvedValueOnce(null);
+    await fireEvent.click(screen.getByTestId('kv-pick-file'));
+    await Promise.resolve();
+    expect(items[0].value).toBe('/a.pdf');
+    await fireEvent.change(screen.getByTestId('kv-type'), { target: { value: 'text' } });
+    expect(items[0]).toEqual({ key: 'doc', value: '', enabled: true });
+  });
+});
+
 describe('ConfirmDialog', () => {
   afterEach(() => dialogs.current?.kind === 'confirm' && dialogs.current.resolve('cancel'));
 
@@ -131,6 +181,17 @@ describe('ConfirmDialog', () => {
 });
 
 describe('BodyEditor', () => {
+  it('avisa que o formulário com arquivo vai como multipart', () => {
+    const props = $state({
+      body: {
+        type: 'form-urlencoded',
+        fields: [{ key: 'f', value: '/x.png', enabled: true, type: 'file' }],
+      } as Body,
+    });
+    render(BodyEditor, props);
+    expect(screen.getByTestId('multipart-hint')).toHaveTextContent('multipart/form-data');
+  });
+
   it('avisa JSON inválido sem considerar os placeholders', async () => {
     const props = $state({ body: { type: 'json', content: '{ "id": {{produtoId}} }' } as Body });
     render(BodyEditor, props);

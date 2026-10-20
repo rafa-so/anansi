@@ -1,7 +1,7 @@
 <script lang="ts">
   // Método, URL, Params / Headers / Body / Configurações e ações do request ativo.
   import { curlMenuItems } from '../curl';
-  import { moveQueryFromUrl } from '../request';
+  import { automaticContentType, hasFiles, moveQueryFromUrl } from '../request';
   import { environments } from '../state/environments.svelte';
   import { tabs, type Tab } from '../state/tabs.svelte';
   import { HTTP_METHODS } from '../types';
@@ -163,15 +163,14 @@
       <KeyValueTable bind:items={tab.draft.query} label="Query params" keyPlaceholder="Parâmetro" {known} />
     {:else if section === 'headers'}
       <KeyValueTable bind:items={tab.draft.headers} label="Headers" keyPlaceholder="Header" {known} />
-      {#if tab.draft.body.type !== 'none' && !tab.draft.headers.some((h) => h.enabled && h.key.toLowerCase() === 'content-type')}
+      {#if hasFiles(tab.draft.body)}
         <p class="muted auto">
-          Content-Type automático: <span class="mono"
-            >{tab.draft.body.type === 'json'
-              ? 'application/json'
-              : tab.draft.body.type === 'text'
-                ? 'text/plain; charset=utf-8'
-                : 'application/x-www-form-urlencoded'}</span
-          >
+          Content-Type automático: <span class="mono">multipart/form-data; boundary=…</span> (substitui o Content-Type
+          definido nos headers)
+        </p>
+      {:else if tab.draft.body.type !== 'none' && !tab.draft.headers.some((h) => h.enabled && h.key.toLowerCase() === 'content-type')}
+        <p class="muted auto">
+          Content-Type automático: <span class="mono">{automaticContentType(tab.draft.body)}</span>
         </p>
       {/if}
     {:else if section === 'body'}

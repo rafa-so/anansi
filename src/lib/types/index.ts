@@ -6,11 +6,16 @@ export const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELET
 
 export type KeyValue = { key: string; value: string; enabled: boolean };
 
+export type FormFieldType = 'text' | 'file';
+
+/** Campo do body de formulário. Sem `type` é texto; no `file`, o `value` é o caminho do arquivo. */
+export type FormField = KeyValue & { type?: FormFieldType };
+
 export type Body =
   | { type: 'none' }
   | { type: 'json'; content: string }
   | { type: 'text'; content: string }
-  | { type: 'form-urlencoded'; fields: KeyValue[] };
+  | { type: 'form-urlencoded'; fields: FormField[] };
 
 export type BodyType = Body['type'];
 

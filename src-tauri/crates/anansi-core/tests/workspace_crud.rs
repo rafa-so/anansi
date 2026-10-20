@@ -2,9 +2,9 @@
 
 mod common;
 
-use common::*;
-use anansi_core::model::{Body, HttpMethod, KeyValue, RequestFile, Settings, TreeNode};
+use anansi_core::model::{Body, FormField, HttpMethod, KeyValue, RequestFile, Settings, TreeNode};
 use anansi_core::Workspace;
+use common::*;
 use pretty_assertions::assert_eq;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -238,11 +238,18 @@ fn body_files_follow_body_type() {
     assert_eq!(read(&root, "c/criar-produto.body.txt"), "texto");
 
     req.body = Body::FormUrlencoded {
-        fields: vec![kv("a", "1")],
+        fields: vec![
+            FormField::text("a", "1"),
+            FormField::file("anexo", "C:/docs/a.pdf"),
+        ],
     };
     ws.request_save(&rel, &req).unwrap();
     assert!(!exists(&root, "c/criar-produto.body.txt"));
     assert!(read(&root, &rel).contains("\"form-urlencoded\""));
+    assert!(
+        read(&root, &rel).contains("\"type\": \"file\""),
+        "campo de arquivo grava o tipo"
+    );
     assert_eq!(ws.request_get(&rel).unwrap().body, req.body);
 
     req.body = Body::None;

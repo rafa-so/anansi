@@ -7,10 +7,11 @@
 use crate::env::resolver::Resolver;
 use crate::env::EnvironmentData;
 use crate::error::{AppError, AppResult};
-use crate::model::{Body, KeyValue, RequestFile};
+use crate::model::{Body, FormField, KeyValue, RequestFile};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -321,22 +322,127 @@ fn has_header(headers: &[(String, String)], name: &str) -> bool {
 }
 
 /// `Content-Type` automático por tipo de body (RF-09), quando o usuário não definiu.
+///
+/// Formulário com arquivo vira `multipart/form-data`; no envio, o `boundary` é acrescentado.
 pub fn automatic_content_type(body: &Body) -> Option<&'static str> {
     match body {
         Body::Json { .. } => Some("application/json"),
         Body::Text { .. } => Some("text/plain; charset=utf-8"),
+        Body::FormUrlencoded { .. } if body.has_files() => Some("multipart/form-data"),
         Body::FormUrlencoded { .. } => Some("application/x-www-form-urlencoded"),
         Body::None => None,
     }
 }
 
 /// Codifica os campos habilitados de um form-urlencoded.
-pub fn encode_form(fields: &[KeyValue]) -> String {
+pub fn encode_form(fields: &[FormField]) -> String {
     let mut ser = url::form_urlencoded::Serializer::new(String::new());
     for f in fields.iter().filter(|f| f.enabled) {
         ser.append_pair(&f.key, &f.value);
     }
     ser.finish()
+}
+
+/// Separador único por envio: horário em nanossegundos + contador.
+fn new_boundary() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("----anansi{nanos:x}{n:x}")
+}
+
+/// Nome dentro de `Content-Disposition`: aspas e quebras de linha escapadas (como os navegadores).
+fn disposition_name(text: &str) -> String {
+    text.replace('"', "%22")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+/// `Content-Type` da parte de arquivo, pela extensão. Desconhecida → `application/octet-stream`.
+pub fn mime_for_path(path: &str) -> &'static str {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "pdf" => "application/pdf",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "gz" => "application/gzip",
+        "csv" => "text/csv",
+        "txt" | "log" => "text/plain",
+        "html" | "htm" => "text/html",
+        "md" => "text/markdown",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "mp4" => "video/mp4",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Monta um `multipart/form-data` com os campos habilitados, lendo os arquivos do disco.
+/// Devolve o `boundary` e o corpo.
+pub fn encode_multipart(fields: &[FormField]) -> AppResult<(String, Vec<u8>)> {
+    let boundary = new_boundary();
+    let mut out: Vec<u8> = Vec::new();
+    for f in fields.iter().filter(|f| f.enabled) {
+        out.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        let name = disposition_name(&f.key);
+        if f.is_file() {
+            let path = f.value.trim();
+            if path.is_empty() {
+                return Err(AppError::InvalidFile(format!(
+                    "O campo \"{}\" é do tipo arquivo, mas nenhum arquivo foi escolhido.",
+                    f.key
+                )));
+            }
+            let content = std::fs::read(path).map_err(|e| {
+                AppError::InvalidFile(format!(
+                    "Não foi possível ler o arquivo do campo \"{}\" ({path}): {e}",
+                    f.key
+                ))
+            })?;
+            let file_name = Path::new(path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string());
+            out.extend_from_slice(
+                format!(
+                    "Content-Disposition: form-data; name=\"{name}\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
+                    disposition_name(&file_name),
+                    mime_for_path(path)
+                )
+                .as_bytes(),
+            );
+            out.extend_from_slice(&content);
+        } else {
+            out.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
+            );
+            out.extend_from_slice(f.value.as_bytes());
+        }
+        out.extend_from_slice(b"\r\n");
+    }
+    out.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    Ok((boundary, out))
 }
 
 fn prepare(
@@ -384,6 +490,16 @@ fn prepare(
     let body = match &resolved.body {
         Body::None => None,
         Body::Json { content } | Body::Text { content } => Some(content.clone().into_bytes()),
+        Body::FormUrlencoded { fields } if resolved.body.has_files() => {
+            // O boundary é gerado aqui, então o Content-Type do usuário (sem boundary) é trocado.
+            let (boundary, bytes) = encode_multipart(fields)?;
+            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-type"));
+            headers.push((
+                "Content-Type".into(),
+                format!("multipart/form-data; boundary={boundary}"),
+            ));
+            Some(bytes)
+        }
         Body::FormUrlencoded { fields } => Some(encode_form(fields).into_bytes()),
     };
     if let Some(ct) = automatic_content_type(&resolved.body) {
@@ -538,9 +654,7 @@ mod tests {
     #[test]
     fn missing_scheme_defaults_to_http() {
         assert_eq!(
-            build_url("localhost:8080/orders", &[])
-                .unwrap()
-                .as_str(),
+            build_url("localhost:8080/orders", &[]).unwrap().as_str(),
             "http://localhost:8080/orders"
         );
     }
@@ -580,13 +694,87 @@ mod tests {
     #[test]
     fn form_encoding_skips_disabled_fields() {
         let fields = [
-            kv("a", "1 2"),
-            KeyValue {
+            FormField::text("a", "1 2"),
+            FormField {
                 enabled: false,
-                ..kv("b", "x")
+                ..FormField::text("b", "x")
             },
-            kv("c", "ç"),
+            FormField::text("c", "ç"),
         ];
         assert_eq!(encode_form(&fields), "a=1+2&c=%C3%A7");
+    }
+
+    #[test]
+    fn multipart_has_text_and_file_parts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("foto \"1\".png");
+        std::fs::write(&path, [0u8, 159, 146, 150]).unwrap();
+        let fields = [
+            FormField::text("nome", "Ana"),
+            FormField::file("foto", path.to_str().unwrap()),
+            FormField {
+                enabled: false,
+                ..FormField::text("off", "x")
+            },
+        ];
+        let (boundary, body) = encode_multipart(&fields).unwrap();
+        let mut expected = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"nome\"\r\n\r\nAna\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"foto\"; filename=\"foto %221%22.png\"\r\nContent-Type: image/png\r\n\r\n"
+        )
+        .into_bytes();
+        expected.extend_from_slice(&[0u8, 159, 146, 150]);
+        expected.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        assert_eq!(body, expected);
+        assert_ne!(
+            encode_multipart(&fields).unwrap().0,
+            boundary,
+            "boundary novo a cada envio"
+        );
+    }
+
+    #[test]
+    fn multipart_errors_for_missing_or_empty_file() {
+        let err = encode_multipart(&[FormField::file("doc", "  ")]).unwrap_err();
+        assert_eq!(err.code(), "INVALID_FILE");
+        assert!(err.to_string().contains("nenhum arquivo foi escolhido"));
+        let err = encode_multipart(&[FormField::file("doc", "/nao/existe.pdf")]).unwrap_err();
+        assert!(err.to_string().contains("/nao/existe.pdf"));
+    }
+
+    #[test]
+    fn multipart_replaces_user_content_type_with_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "oi").unwrap();
+        let request = RequestFile {
+            schema_version: 1,
+            name: "x".into(),
+            method: HttpMethod::Post,
+            url: "http://x/upload".into(),
+            query: vec![],
+            headers: vec![kv("content-type", "multipart/form-data")],
+            body: Body::FormUrlencoded {
+                fields: vec![FormField::file("a", path.to_str().unwrap())],
+            },
+            settings: Settings::default(),
+        };
+        let prepared = prepare(&request, None, HttpDefaults::default())
+            .ok()
+            .unwrap();
+        let cts: Vec<_> = prepared
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            .collect();
+        assert_eq!(cts.len(), 1);
+        assert!(cts[0]
+            .1
+            .starts_with("multipart/form-data; boundary=----anansi"));
+    }
+
+    #[test]
+    fn mime_by_extension() {
+        assert_eq!(mime_for_path("C:/a/B.PNG"), "image/png");
+        assert_eq!(mime_for_path("/x/arquivo"), "application/octet-stream");
     }
 }

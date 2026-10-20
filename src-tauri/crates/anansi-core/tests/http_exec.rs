@@ -3,7 +3,7 @@
 
 use anansi_core::env::{EnvironmentData, SecretValue};
 use anansi_core::http::{BodyEncoding, Executor, HttpDefaults};
-use anansi_core::model::{Body, HttpMethod, KeyValue, RequestFile, Settings};
+use anansi_core::model::{Body, FormField, HttpMethod, KeyValue, RequestFile, Settings};
 use pretty_assertions::assert_eq;
 use std::io::Write;
 use std::sync::Arc;
@@ -127,11 +127,11 @@ async fn explicit_content_type_wins_and_form_body_is_encoded() {
     form.method = HttpMethod::Post;
     form.body = Body::FormUrlencoded {
         fields: vec![
-            kv("a", "1 2"),
-            kv("b", "ç"),
-            KeyValue {
+            FormField::text("a", "1 2"),
+            FormField::text("b", "ç"),
+            FormField {
                 enabled: false,
-                ..kv("c", "x")
+                ..FormField::text("c", "x")
             },
         ],
     };
@@ -518,4 +518,59 @@ async fn global_default_applies_when_request_does_not_define() {
         .await
         .unwrap();
     assert!(!response.tls_verified);
+}
+
+/// Formulário com arquivo sai como multipart/form-data, com o conteúdo do arquivo.
+#[tokio::test]
+async fn form_with_file_is_sent_as_multipart() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(|req: &Request| {
+            let ct = req
+                .headers
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            ResponseTemplate::new(200)
+                .set_body_string(format!("{ct}\n{}", String::from_utf8_lossy(&req.body)))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("nota.txt");
+    std::fs::write(&file, "conteúdo do arquivo").unwrap();
+
+    let mut form = get(&server.uri());
+    form.method = HttpMethod::Post;
+    form.body = Body::FormUrlencoded {
+        fields: vec![
+            FormField::text("nome", "Ana"),
+            FormField::file("anexo", file.to_str().unwrap()),
+        ],
+    };
+    let response = send(&Executor::default(), &form, None).await.unwrap();
+    assert_eq!(response.status, 200);
+    let (ct, body) = response.body.split_once('\n').unwrap();
+    let boundary = ct
+        .strip_prefix("multipart/form-data; boundary=")
+        .expect("content-type multipart com boundary");
+    assert!(body.contains("Content-Disposition: form-data; name=\"nome\"\r\n\r\nAna\r\n"));
+    assert!(body.contains(
+        "Content-Disposition: form-data; name=\"anexo\"; filename=\"nota.txt\"\r\nContent-Type: text/plain\r\n\r\nconteúdo do arquivo\r\n"
+    ));
+    assert!(body.ends_with(&format!("--{boundary}--\r\n")));
+}
+
+#[tokio::test]
+async fn missing_form_file_is_reported_before_sending() {
+    let mut form = get("http://127.0.0.1:9/x");
+    form.method = HttpMethod::Post;
+    form.body = Body::FormUrlencoded {
+        fields: vec![FormField::file("anexo", "/nao/existe/arquivo.pdf")],
+    };
+    let err = send(&Executor::default(), &form, None).await.unwrap_err();
+    assert_eq!(err.code(), "INVALID_FILE");
+    assert!(err.to_string().contains("anexo"));
 }

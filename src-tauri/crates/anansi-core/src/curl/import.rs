@@ -1,7 +1,9 @@
 //! "Colar cURL" (RF-16, Seção 11.2): só o formato bash/POSIX.
 
 use crate::error::{AppError, AppResult};
-use crate::model::{Body, HttpMethod, KeyValue, RequestFile, Settings, REQUEST_SCHEMA_VERSION};
+use crate::model::{
+    Body, FormField, HttpMethod, KeyValue, RequestFile, Settings, REQUEST_SCHEMA_VERSION,
+};
 use base64::Engine;
 use serde::Serialize;
 
@@ -51,8 +53,6 @@ const UNKNOWN_WITH_VALUE: &[&str] = &[
     "--key",
     "-c",
     "--cookie-jar",
-    "-F",
-    "--form",
     "-T",
     "--upload-file",
     "--resolve",
@@ -135,6 +135,7 @@ pub fn import(text: &str) -> AppResult<Imported> {
     let mut method: Option<String> = None;
     let mut headers: Vec<KeyValue> = vec![];
     let mut data: Vec<String> = vec![];
+    let mut form: Vec<FormField> = vec![];
     let mut settings = Settings::default();
     let mut warnings: Vec<String> = vec![];
 
@@ -147,7 +148,7 @@ pub fn import(text: &str) -> AppResult<Imported> {
             }
         } else if token.starts_with('-')
             && token.len() > 2
-            && ["-X", "-H", "-d", "-u", "-b", "-m", "-A", "-e"].contains(&&token[..2])
+            && ["-X", "-H", "-d", "-u", "-b", "-m", "-A", "-e", "-F"].contains(&&token[..2])
         {
             (token[..2].to_string(), Some(token[2..].to_string()))
         } else {
@@ -181,6 +182,18 @@ pub fn import(text: &str) -> AppResult<Imported> {
                         .push("--data-urlencode foi tratado como --data (sem codificar).".into());
                 }
                 data.push(v);
+            }
+            "-F" | "--form" | "--form-string" => {
+                let raw = value(&flag)?;
+                match parse_form(&raw, flag == "--form-string") {
+                    Some((field, warning)) => {
+                        form.push(field);
+                        warnings.extend(warning);
+                    }
+                    None => {
+                        warnings.push(format!("Campo de formulário ignorado (sem \"=\"): {raw}"))
+                    }
+                }
             }
             "-u" | "--user" => {
                 let creds = value(&flag)?;
@@ -234,7 +247,10 @@ pub fn import(text: &str) -> AppResult<Imported> {
     let url = url.ok_or_else(|| invalid("O comando cURL não tem URL."))?;
     let (base_url, query) = split_query(&url);
 
-    let has_data = !data.is_empty();
+    if !data.is_empty() && !form.is_empty() {
+        warnings.push("O comando mistura -d e -F; só os campos de -F foram importados.".into());
+    }
+    let has_data = !data.is_empty() || !form.is_empty();
     let method_text = method.unwrap_or_else(|| {
         if has_data {
             "POST".into()
@@ -251,7 +267,9 @@ pub fn import(text: &str) -> AppResult<Imported> {
         .find(|h| h.key.eq_ignore_ascii_case("content-type"))
         .map(|h| h.value.to_ascii_lowercase());
     let joined = data.join("&");
-    let body = if !has_data {
+    let body = if !form.is_empty() {
+        Body::FormUrlencoded { fields: form }
+    } else if !has_data {
         Body::None
     } else {
         match content_type.as_deref() {
@@ -291,13 +309,51 @@ pub fn import(text: &str) -> AppResult<Imported> {
 
 fn form_body(text: &str) -> Body {
     let fields = url::form_urlencoded::parse(text.as_bytes())
-        .map(|(k, v)| KeyValue {
-            key: k.into_owned(),
-            value: v.into_owned(),
-            enabled: true,
-        })
+        .map(|(k, v)| FormField::text(&k, &v))
         .collect();
     Body::FormUrlencoded { fields }
+}
+
+/// Lê um `-F nome=valor`. `@caminho` vira campo de arquivo; `<caminho` fica como texto (com aviso).
+/// Atributos como `;type=...` e `;filename=...` são descartados.
+fn parse_form(raw: &str, literal: bool) -> Option<(FormField, Option<String>)> {
+    let (key, value) = raw.split_once('=')?;
+    if literal {
+        return Some((FormField::text(key, value), None));
+    }
+    if let Some(rest) = value.strip_prefix('@') {
+        return Some((FormField::file(key, &form_path(rest)), None));
+    }
+    if value.starts_with('<') {
+        let warning = format!("Campo \"{key}\" lê o texto de um arquivo ({value}), o que não é suportado; o texto foi mantido como está.");
+        return Some((FormField::text(key, value), Some(warning)));
+    }
+    let text = value.split(";type=").next().unwrap_or(value);
+    Some((FormField::text(key, text), None))
+}
+
+/// Caminho de um `@arquivo` do `-F`: aceita `"com aspas"` (com `\\` e `\"`) e corta os atributos.
+fn form_path(rest: &str) -> String {
+    let Some(quoted) = rest.strip_prefix('"') else {
+        return rest.split(';').next().unwrap_or(rest).to_string();
+    };
+    let mut out = String::new();
+    let mut chars = quoted.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => break,
+            '\\' => match chars.next() {
+                Some(n @ ('"' | '\\')) => out.push(n),
+                Some(n) => {
+                    out.push('\\');
+                    out.push(n);
+                }
+                None => out.push('\\'),
+            },
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -326,10 +382,7 @@ mod tests {
         assert_eq!(r.url, "{{base_url_orders_api}}/orders");
         assert_eq!(
             r.headers,
-            vec![
-                kv("x-api-key", ""),
-                kv("Content-Type", "application/json")
-            ]
+            vec![kv("x-api-key", ""), kv("Content-Type", "application/json")]
         );
         assert_eq!(
             r.body,
@@ -360,9 +413,33 @@ mod tests {
         assert_eq!(
             r.body,
             Body::FormUrlencoded {
-                fields: vec![kv("user", "a"), kv("pass", "b c")]
+                fields: vec![FormField::text("user", "a"), FormField::text("pass", "b c")]
             }
         );
+    }
+
+    #[test]
+    fn form_flags_become_text_and_file_fields() {
+        let imported = import(
+            r#"curl https://x/upload -F 'nome=Ana' -F 'foto=@/tmp/eu.png;type=image/png' -F 'doc=@"C:\docs\meu \"cv\".pdf"' --form-string 'raw=@literal' -F 'nota=<nota.txt'"#,
+        )
+        .unwrap();
+        let r = imported.request;
+        assert_eq!(r.method, HttpMethod::Post);
+        assert_eq!(
+            r.body,
+            Body::FormUrlencoded {
+                fields: vec![
+                    FormField::text("nome", "Ana"),
+                    FormField::file("foto", "/tmp/eu.png"),
+                    FormField::file("doc", r#"C:\docs\meu "cv".pdf"#),
+                    FormField::text("raw", "@literal"),
+                    FormField::text("nota", "<nota.txt"),
+                ]
+            }
+        );
+        assert_eq!(imported.warnings.len(), 1);
+        assert!(imported.warnings[0].contains("nota"));
     }
 
     #[test]

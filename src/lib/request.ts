@@ -1,5 +1,5 @@
 // Funções puras sobre requests: criação, normalização, comparação e URL ↔ query.
-import type { Body, BodyType, KeyValue, RequestFile } from './types';
+import type { Body, BodyType, FormField, KeyValue, RequestFile } from './types';
 
 export function newRequest(name = 'Novo request'): RequestFile {
   return {
@@ -32,8 +32,14 @@ function cloneKv(kv: KeyValue): KeyValue {
   return { key: kv.key, value: kv.value, enabled: kv.enabled ?? true };
 }
 
+/** O `type` só é mantido para arquivo, como o backend grava. */
+function cloneField(f: FormField): FormField {
+  const kv = cloneKv(f);
+  return f.type === 'file' ? { ...kv, type: 'file' } : kv;
+}
+
 function cloneBody(body: Body): Body {
-  if (body.type === 'form-urlencoded') return { type: body.type, fields: body.fields.map(cloneKv) };
+  if (body.type === 'form-urlencoded') return { type: body.type, fields: body.fields.map(cloneField) };
   if (body.type === 'json' || body.type === 'text') return { type: body.type, content: body.content };
   return { type: 'none' };
 }
@@ -80,6 +86,25 @@ export function changeBodyType(body: Body, type: BodyType): Body {
   if (type === 'json' || type === 'text') return { type, content };
   if (type === 'form-urlencoded') return { type, fields: body.type === 'form-urlencoded' ? body.fields : [] };
   return { type: 'none' };
+}
+
+/** Formulário com algum arquivo habilitado: é enviado como `multipart/form-data`. */
+export function hasFiles(body: Body): boolean {
+  return body.type === 'form-urlencoded' && body.fields.some((f) => f.enabled && f.type === 'file');
+}
+
+/** Content-Type que o backend usa quando o usuário não define um (no multipart, com boundary). */
+export function automaticContentType(body: Body): string | null {
+  if (body.type === 'json') return 'application/json';
+  if (body.type === 'text') return 'text/plain; charset=utf-8';
+  if (body.type === 'form-urlencoded')
+    return hasFiles(body) ? 'multipart/form-data' : 'application/x-www-form-urlencoded';
+  return null;
+}
+
+/** Nome do arquivo a partir do caminho (Windows ou POSIX). */
+export function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
 }
 
 function decode(s: string): string {
