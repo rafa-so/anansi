@@ -106,6 +106,10 @@ Os testes automatizados passaram num Linux (inclusive o E2E no app real), mas es
 - Sem husky; rode `npm run test:all` antes do push.
 - Scripts do `package.json` precisam funcionar no `cmd.exe` (é o shell que o npm usa no Windows).
 
+## Identidade visual
+
+O ícone (uma aranha pendurada num fio com um commit), a paleta e o passo a passo para atualizar o ícone e o favicon estão em [docs/identidade-visual](docs/identidade-visual/README.md).
+
 ## Licença
 
 [MIT](LICENSE)
