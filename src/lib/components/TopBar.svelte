@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Workspace atual, alerta do .gitignore, ambiente ativo, recarregar e preferências (Seção 13.1).
+  // Workspace atual, pull/push, alerta do .gitignore, ambiente ativo, recarregar e preferências (Seção 13.1).
+  import GitSync from './GitSync.svelte';
   import { environments } from '../state/environments.svelte';
   import { ui } from '../state/ui.svelte';
   import { workspace } from '../state/workspace.svelte';
@@ -14,6 +15,7 @@
   >
     {workspace.info?.name ?? 'Abrir workspace'} ▾
   </button>
+  <GitSync />
   {#if workspace.info && !workspace.info.gitignoreOk}
     <span class="warning" role="alert" data-testid="gitignore-warning">
       ⚠ O .gitignore não protege os arquivos de segredos

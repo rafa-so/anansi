@@ -39,6 +39,8 @@ pub enum AppError {
     Cancelled(String),
     #[error("{0}")]
     IoError(String),
+    #[error("{0}")]
+    GitError(String),
 }
 
 impl AppError {
@@ -60,6 +62,7 @@ impl AppError {
             AppError::ResponseTooLarge(_) => "RESPONSE_TOO_LARGE",
             AppError::Cancelled(_) => "CANCELLED",
             AppError::IoError(_) => "IO_ERROR",
+            AppError::GitError(_) => "GIT_ERROR",
         }
     }
 
@@ -117,6 +120,7 @@ mod tests {
             AppError::ResponseTooLarge(String::new()),
             AppError::Cancelled(String::new()),
             AppError::IoError(String::new()),
+            AppError::GitError(String::new()),
         ];
         for err in all {
             let json = serde_json::to_value(&err).unwrap();

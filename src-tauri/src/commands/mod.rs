@@ -6,6 +6,7 @@ pub mod collections;
 pub mod curl;
 pub mod environments;
 pub mod folders;
+pub mod git;
 pub mod http;
 pub mod requests;
 pub mod settings;

@@ -5,7 +5,8 @@ import { emit } from '@tauri-apps/api/event';
 import App from '../App.svelte';
 import { workspace } from '../lib/state/workspace.svelte';
 import { tabs } from '../lib/state/tabs.svelte';
-import type { TreeNode, WorkspaceInfo } from '../lib/types';
+import { git } from '../lib/state/git.svelte';
+import type { GitStatus, TreeNode, WorkspaceInfo } from '../lib/types';
 
 const info: WorkspaceInfo = {
   path: 'C:\\\\projetos\\\\minhas-collections',
@@ -35,12 +36,25 @@ let saved: unknown[];
 let treeCalls: number;
 let sent: unknown[];
 let fixed: boolean;
+let gitStatus: GitStatus;
+let pushes: unknown[];
+let pulls: number;
 
 beforeEach(() => {
   saved = [];
   treeCalls = 0;
   sent = [];
   fixed = false;
+  gitStatus = {
+    availability: 'ready',
+    branch: 'main',
+    upstream: 'origin/main',
+    changes: 0,
+    ahead: 0,
+    behind: 0,
+  };
+  pushes = [];
+  pulls = 0;
   mockWindows('main');
   mockIPC(
     (cmd, args) => {
@@ -81,6 +95,18 @@ beforeEach(() => {
           return null;
         case 'gitignore_status':
           return { ok: fixed };
+        case 'git_status':
+          return gitStatus;
+        case 'git_pull':
+          pulls++;
+          return { updated: true, status: { ...gitStatus, behind: 0 } };
+        case 'git_push':
+          pushes.push(args);
+          return {
+            committed: gitStatus.changes > 0,
+            pushed: true,
+            status: { ...gitStatus, changes: 0, ahead: 0 },
+          };
         default:
           return null;
       }
@@ -91,6 +117,7 @@ beforeEach(() => {
   workspace.info = null;
   workspace.expanded.clear();
   workspace.search = '';
+  git.reset();
 });
 
 afterEach(() => {
@@ -174,5 +201,93 @@ describe('App', () => {
     const before = treeCalls;
     await emit('workspace://changed', { paths: ['store-api/novo.json'] });
     await waitFor(() => expect(treeCalls).toBe(before + 1));
+  });
+});
+
+describe('Pull e push', () => {
+  it('mostra quantos commits há para puxar e quantas alterações há para enviar', async () => {
+    current = info;
+    gitStatus = { ...gitStatus, behind: 2, changes: 3, ahead: 1 };
+    render(App);
+    expect(await screen.findByTestId('git-behind')).toHaveTextContent('2');
+    expect(screen.getByTestId('git-pending')).toHaveTextContent('4');
+    expect(screen.getByTestId('git-pull')).toBeEnabled();
+  });
+
+  it('fora de um repositório git, os botões ficam desabilitados com o motivo', async () => {
+    current = info;
+    gitStatus = { ...gitStatus, availability: 'not-a-repo', branch: null, upstream: null };
+    render(App);
+    await waitFor(() => expect(screen.getByTestId('git-push')).toBeDisabled());
+    expect(screen.getByTestId('git-pull')).toBeDisabled();
+    expect(screen.getByTestId('git-push')).toHaveAttribute(
+      'title',
+      expect.stringContaining('repositório git'),
+    );
+  });
+
+  it('pull traz as alterações e recarrega a árvore', async () => {
+    current = info;
+    render(App);
+    const pull = await screen.findByTestId('git-pull');
+    await waitFor(() => expect(pull).toBeEnabled());
+    const before = treeCalls;
+    await fireEvent.click(pull);
+    await waitFor(() => expect(pulls).toBe(1));
+    await waitFor(() => expect(treeCalls).toBeGreaterThan(before));
+  });
+
+  it('push sem alterações envia direto, sem pedir título', async () => {
+    current = info;
+    gitStatus = { ...gitStatus, ahead: 1 };
+    render(App);
+    const push = await screen.findByTestId('git-push');
+    await waitFor(() => expect(push).toBeEnabled());
+    await fireEvent.click(push);
+    await waitFor(() => expect(pushes).toEqual([{ message: null }]));
+    expect(screen.queryByTestId('commit-dialog')).toBeNull();
+  });
+
+  it('push com alterações pede o título do commit', async () => {
+    current = info;
+    gitStatus = { ...gitStatus, changes: 2 };
+    render(App);
+    const push = await screen.findByTestId('git-push');
+    await waitFor(() => expect(push).toBeEnabled());
+    await fireEvent.click(push);
+    expect(await screen.findByTestId('commit-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('commit-ok')).toBeDisabled();
+    await fireEvent.input(screen.getByTestId('commit-message'), { target: { value: '  novos requests  ' } });
+    await fireEvent.click(screen.getByTestId('commit-ok'));
+    await waitFor(() => expect(pushes).toEqual([{ message: 'novos requests' }]));
+    expect(screen.queryByTestId('commit-dialog')).toBeNull();
+  });
+
+  it('cancelar o diálogo não envia nada', async () => {
+    current = info;
+    gitStatus = { ...gitStatus, changes: 1 };
+    render(App);
+    const push = await screen.findByTestId('git-push');
+    await waitFor(() => expect(push).toBeEnabled());
+    await fireEvent.click(push);
+    await fireEvent.click(await screen.findByText('Cancelar'));
+    expect(screen.queryByTestId('commit-dialog')).toBeNull();
+    expect(pushes).toEqual([]);
+  });
+
+  it('salva as abas pendentes antes do commit', async () => {
+    current = info;
+    render(App);
+    await fireEvent.click(await screen.findByText('Store API'));
+    await fireEvent.click(await screen.findByText('Health check'));
+    const url = (await screen.findByTestId('url')) as HTMLInputElement;
+    await fireEvent.input(url, { target: { value: '{{base}}/health?full=1' } });
+    await fireEvent.blur(url);
+    await fireEvent.click(screen.getByTestId('git-push'));
+    expect(await screen.findByTestId('commit-save-tabs')).toBeChecked();
+    await fireEvent.input(screen.getByTestId('commit-message'), { target: { value: 'health completo' } });
+    await fireEvent.click(screen.getByTestId('commit-ok'));
+    await waitFor(() => expect(pushes).toHaveLength(1));
+    expect(saved).toHaveLength(1);
   });
 });

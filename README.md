@@ -8,7 +8,7 @@ O nome vem de Anansi, a aranha dos contos akan da África Ocidental que guarda t
 
 ## Estado atual
 
-O MVP está implementado: collections, pastas, CRUD e execução de requests, ambientes e segredos, importação e exportação de cURL e recarga automática quando os arquivos mudam por fora. O que só dá para validar no Windows está na seção "Validação no Windows", abaixo.
+O MVP está implementado: collections, pastas, CRUD e execução de requests, ambientes e segredos, importação e exportação de cURL, recarga automática quando os arquivos mudam por fora e pull/push do git pela barra superior. O que só dá para validar no Windows está na seção "Validação no Windows", abaixo.
 
 ## Pré-requisitos (Windows)
 
@@ -78,8 +78,14 @@ A versão fica em `src-tauri/tauri.conf.json` e no `package.json`; atualize as d
 5. `Ctrl+Enter` envia e `Esc` cancela. A resposta aparece embaixo (o divisor é arrastável); "Salvar…" grava o body completo em arquivo.
 6. **Importar cURL** (rodapé da árvore) aceita o formato bash: "Copy as cURL (bash)" do Chrome/Edge ou o cURL do Postman.
 7. Atalhos: `Ctrl+S` salva, `Ctrl+N` cria um request, `Ctrl+W` fecha a aba, `Ctrl+P` busca na árvore, `Ctrl+Tab` troca de aba.
-8. Alterações feitas por fora (git pull, editor) aparecem sozinhas. Se o watcher não perceber (ex.: unidade de rede), use ⟳ (Recarregar workspace).
-9. ⚙ (Preferências) define o padrão de verificação de TLS e o timeout. Cada request pode mudar isso na aba **Configurações**.
+8. **↓ Pull** e **↑ Push** (ao lado do nome do workspace) sincronizam com o git, sempre na branch em que o repositório está:
+   - Pull roda `git pull --rebase --autostash`: traz os commits do remote sem perder o que você ainda não commitou.
+   - Push commita tudo o que mudou no workspace (`git add --all` só na pasta do workspace), traz o remote e envia. Se houver alterações, o app pede o título do commit e oferece salvar as abas pendentes; sem alterações, só envia os commits que faltam.
+   - Os números nos botões mostram os commits para puxar (desde o último fetch) e as alterações e commits para enviar.
+   - Em conflito, o rebase é abortado e nada muda no disco; resolva pelo terminal ou editor e tente de novo. O push recusa commitar se o `.gitignore` não protege os segredos.
+   - Usa o `git` instalado na máquina, com as credenciais que já estão configuradas (Git Credential Manager ou chave SSH).
+9. Alterações feitas por fora (git pull, editor) aparecem sozinhas. Se o watcher não perceber (ex.: unidade de rede), use ⟳ (Recarregar workspace).
+10. ⚙ (Preferências) define o padrão de verificação de TLS e o timeout. Cada request pode mudar isso na aba **Configurações**.
 
 No body **Form URL-encoded**, cada campo pode ser **Texto** ou **Arquivo** (coluna Tipo). No tipo Arquivo, "Escolher…" abre o seletor e o valor guarda o caminho do arquivo na sua máquina (aceita `{{nome}}`). Com algum arquivo habilitado, o request vai como `multipart/form-data` (o app gera o `boundary` e substitui o Content-Type dos headers) e o "Copiar como cURL" usa `-F`. Como o caminho é local, quem usar a collection em outra máquina precisa escolher o arquivo de novo ou usar uma variável de ambiente no caminho.
 
@@ -99,6 +105,7 @@ Os testes automatizados passaram num Linux (inclusive o E2E no app real), mas es
 | Proxy                     | Se a rede usar proxy, conferir uma chamada a `hml` (o proxy fixo do Windows é lido; script PAC não) |
 | `localhost`               | Chamar um serviço rodando no Windows ou no Docker Desktop                                           |
 | Instalador                | `npm run tauri build` e instalar o `.exe` gerado                                                    |
+| Pull e push               | Sem credencial salva, a janela do Git Credential Manager abre, e nenhum console pisca               |
 
 ## Convenções
 

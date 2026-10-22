@@ -8,6 +8,7 @@ import { filterTree, parentPath } from '../tree';
 import { errorMessage, isAppError, type TreeNode, type WorkspaceInfo } from '../types';
 import { dialogs, toasts } from './dialogs.svelte';
 import { environments } from './environments.svelte';
+import { git } from './git.svelte';
 import { tabs } from './tabs.svelte';
 
 class WorkspaceState {
@@ -38,8 +39,10 @@ class WorkspaceState {
     }
   }
 
+  /** Relê a árvore e o status do git (que muda a cada arquivo salvo). */
   async refresh() {
     if (!this.info) return;
+    void git.refresh();
     try {
       this.tree = await workspaceApi.tree();
     } catch (e) {
@@ -76,6 +79,7 @@ class WorkspaceState {
     this.expanded.clear();
     this.search = '';
     environments.reset();
+    git.reset();
     await Promise.all([this.refresh(), environments.load()]);
   }
 
@@ -217,3 +221,4 @@ class WorkspaceState {
 
 export const workspace = new WorkspaceState();
 tabs.onTreeChanged = () => void workspace.refresh();
+git.onSynced = () => workspace.reload();
