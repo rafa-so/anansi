@@ -6,5 +6,7 @@ e2e/.tmp/
 gen/*
 src-tauri/gen/schemas/
 docs/*
+!docs/identidade-visual/
 .github/*
 CLAUDE.md
+Claude outputs/
