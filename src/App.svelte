@@ -12,16 +12,18 @@
   import EnvironmentsDialog from './lib/components/EnvironmentsDialog.svelte';
   import CurlImportDialog from './lib/components/CurlImportDialog.svelte';
   import PreferencesDialog from './lib/components/PreferencesDialog.svelte';
+  import CommitDialog from './lib/components/CommitDialog.svelte';
   import { workspace } from './lib/state/workspace.svelte';
   import { tabs } from './lib/state/tabs.svelte';
   import { dialogs } from './lib/state/dialogs.svelte';
   import { ui } from './lib/state/ui.svelte';
+  import { git } from './lib/state/git.svelte';
   import { installShortcuts, type ShortcutAction } from './lib/shortcuts';
 
   let searchInput = $state<HTMLInputElement | null>(null);
 
   function runShortcut(action: ShortcutAction): boolean | void {
-    if (dialogs.current || ui.anyOpen) return action === 'cancel' ? false : true;
+    if (dialogs.current || ui.anyOpen || git.commitOpen) return action === 'cancel' ? false : true;
     switch (action) {
       case 'save':
         if (tabs.activeId) tabs.save();
@@ -53,6 +55,11 @@
   onMount(() => {
     workspace.load();
     const removeShortcuts = installShortcuts(window, runShortcut);
+    // Commits e pulls feitos pelo terminal: o status do git é relido ao voltar para o app.
+    const onFocus = () => {
+      if (workspace.info) git.refresh();
+    };
+    window.addEventListener('focus', onFocus);
     let unlistenClose: (() => void) | undefined;
     // Fechar o app com abas pendentes pede confirmação, no diálogo da interface.
     getCurrentWindow()
@@ -72,6 +79,7 @@
     ];
     return () => {
       removeShortcuts();
+      window.removeEventListener('focus', onFocus);
       unlistenClose?.();
       for (const u of unlisteners) u.then((fn) => fn()).catch(() => {});
     };
@@ -116,6 +124,7 @@
 {#if ui.environmentsOpen}<EnvironmentsDialog />{/if}
 {#if ui.curlImport.open}<CurlImportDialog />{/if}
 {#if ui.prefsOpen}<PreferencesDialog />{/if}
+{#if git.commitOpen}<CommitDialog />{/if}
 <ConfirmDialog />
 <Toasts />
 

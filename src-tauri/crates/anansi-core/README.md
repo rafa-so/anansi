@@ -2,7 +2,7 @@
 
 ## Introdução
 
-Toda a lógica do `anansi`: leitura e escrita do workspace (collections, pastas, requests e bodies), slugs, validação de caminhos, ambientes e segredos, resolução de `{{variáveis}}`, execução HTTP, cURL (exportar e importar) e file watcher. Não depende do Tauri: o crate do app (`src-tauri/src`) só converte os comandos do frontend em chamadas daqui.
+Toda a lógica do `anansi`: leitura e escrita do workspace (collections, pastas, requests e bodies), slugs, validação de caminhos, ambientes e segredos, resolução de `{{variáveis}}`, execução HTTP, cURL (exportar e importar), file watcher e pull/push do git (chama o `git` instalado na máquina, para usar as credenciais do usuário). Não depende do Tauri: o crate do app (`src-tauri/src`) só converte os comandos do frontend em chamadas daqui.
 
 ## Dependências
 

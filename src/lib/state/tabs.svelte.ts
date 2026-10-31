@@ -55,6 +55,17 @@ class TabsState {
     return this.tabs.some((t) => this.isDirty(t));
   }
 
+  /** Abas não salvas que dá para salvar sem perguntar nada: já têm arquivo e não conflitam com o disco. */
+  get savableDirty(): Tab[] {
+    return this.tabs.filter((t) => t.path !== null && t.diskState === 'ok' && this.isDirty(t));
+  }
+
+  /** Salva as `savableDirty` (antes do commit). `false` se alguma falhou. */
+  async saveAllSavable(): Promise<boolean> {
+    for (const tab of this.savableDirty) if (!(await this.save(tab.id))) return false;
+    return true;
+  }
+
   isDirty(tab: Tab): boolean {
     return tab.path === null || tab.diskState === 'removed' || isDirty(tab.saved, tab.draft);
   }

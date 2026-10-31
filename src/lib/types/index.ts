@@ -100,3 +100,19 @@ export type EnvView = {
 export type CurlFormat = 'bash' | 'powershell';
 
 export type GlobalPrefs = { defaultVerifyTls: boolean; defaultTimeoutMs: number };
+
+/** `ready`: dá para usar pull e push; os outros desabilitam os botões. */
+export type GitAvailability = 'ready' | 'not-a-repo' | 'git-missing';
+
+export type GitStatus = {
+  availability: GitAvailability;
+  branch: string | null;
+  upstream: string | null;
+  changes: number;
+  ahead: number;
+  behind: number;
+};
+
+export type GitPullResult = { updated: boolean; status: GitStatus };
+
+export type GitPushResult = { committed: boolean; pushed: boolean; status: GitStatus };
