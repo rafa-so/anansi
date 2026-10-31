@@ -238,3 +238,109 @@ fn workspace_in_a_subfolder_only_commits_the_subfolder() {
     assert!(!exists(&t.bruno, "fora.txt"));
     assert!(exists(&t.alice, "fora.txt"));
 }
+
+// ----- Bearer Token (docs/bearer-token-local/SPEC.md) -----
+
+const LITERAL: &str = r#"{"schemaVersion":1,"name":"a","method":"GET","url":"https://x","headers":[{"key":"Authorization","value":"Bearer eyJsegredo123","enabled":true}]}"#;
+const REFERENCE: &str = r#"{"schemaVersion":1,"name":"a","method":"GET","url":"https://x","headers":[{"key":"Authorization","value":"Bearer {{bearer_token}}","enabled":true}]}"#;
+
+fn try_run(dir: &Path, args: &[&str]) -> (bool, String) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// O push pelo app recusa token em texto puro e lista os arquivos.
+#[test]
+fn push_refuses_literal_bearer_and_lists_files() {
+    let t = team();
+    write(&t.alice, "c/a.json", LITERAL);
+    let err = git::push(&t.alice, Some("com token")).unwrap_err();
+    assert_eq!(err.code(), "BEARER_LITERAL_FOUND");
+    assert!(err.to_string().contains("c/a.json"));
+    assert!(
+        !err.to_string().contains("eyJsegredo123"),
+        "a mensagem não mostra o token"
+    );
+    assert_eq!(git::bearer_literals(&t.alice).unwrap(), vec!["c/a.json"]);
+    assert_eq!(
+        last_message(&t.alice),
+        "workspace inicial",
+        "nada foi commitado"
+    );
+
+    write(&t.alice, "c/a.json", REFERENCE);
+    assert!(git::bearer_literals(&t.alice).unwrap().is_empty());
+    git::push(&t.alice, Some("com referência")).unwrap();
+    let head = run(&t.alice, &["show", "HEAD"]);
+    assert!(!head.contains("eyJsegredo123"));
+}
+
+/// O status instala o hook; um commit pelo terminal com token é bloqueado.
+#[test]
+fn hook_blocks_terminal_commits_with_literal_bearer_or_secrets() {
+    let t = team();
+    let st = git::status(&t.bruno).unwrap();
+    assert_eq!(st.hook, git::hooks::HookState::Installed);
+    let hook = t.bruno.join(".git/hooks/pre-commit");
+    assert!(std::fs::read_to_string(&hook)
+        .unwrap()
+        .contains(git::hooks::HOOK_MARKER));
+
+    write(&t.bruno, "c/a.json", LITERAL);
+    run(&t.bruno, &["add", "c/a.json"]);
+    let (ok, stderr) = try_run(&t.bruno, &["commit", "-q", "-m", "x"]);
+    assert!(!ok, "commit com token deveria falhar");
+    assert!(stderr.contains("c/a.json"), "{stderr}");
+
+    write(&t.bruno, "c/a.json", REFERENCE);
+    run(&t.bruno, &["add", "c/a.json"]);
+    run(&t.bruno, &["commit", "-q", "-m", "com referência"]);
+
+    write(&t.bruno, "environments/hml.secrets.json", "{}");
+    run(&t.bruno, &["add", "-f", "environments/hml.secrets.json"]);
+    let (ok, stderr) = try_run(&t.bruno, &["commit", "-q", "-m", "segredos"]);
+    assert!(!ok);
+    assert!(stderr.contains("environments/hml.secrets.json"), "{stderr}");
+
+    let (ok, _) = try_run(&t.bruno, &["commit", "-q", "--no-verify", "-m", "pulando"]);
+    assert!(ok, "--no-verify pula o hook");
+}
+
+/// Um pre-commit do usuário nunca é sobrescrito.
+#[test]
+fn custom_hook_is_kept() {
+    let t = team();
+    let hook = t.bruno.join(".git/hooks/pre-commit");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
+    let st = git::status(&t.bruno).unwrap();
+    assert_eq!(st.hook, git::hooks::HookState::Custom);
+    assert_eq!(
+        std::fs::read_to_string(&hook).unwrap(),
+        "#!/bin/sh\nexit 0\n"
+    );
+}
+
+/// Hook do anansi de versão antiga é atualizado.
+#[test]
+fn old_anansi_hook_is_updated() {
+    let t = team();
+    let hook = t.bruno.join(".git/hooks/pre-commit");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(&hook, "#!/bin/sh\n# anansi:pre-commit v0\nexit 0\n").unwrap();
+    assert_eq!(
+        git::status(&t.bruno).unwrap().hook,
+        git::hooks::HookState::Installed
+    );
+    assert_eq!(
+        std::fs::read_to_string(&hook).unwrap(),
+        git::hooks::script()
+    );
+}

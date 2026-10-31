@@ -6,6 +6,7 @@
 //! Valores de segredos ficam em `SecretValue`, que nunca aparece em logs nem
 //! em mensagens de erro, e só saem do backend por `reveal_secret`.
 
+pub mod bearer;
 pub mod gitignore;
 pub mod resolver;
 
@@ -93,6 +94,51 @@ impl EnvironmentData {
         names.dedup();
         names
     }
+
+    /// Como `names`, sem os segredos vazios: um segredo sem valor conta como
+    /// "não definido" no destaque e no aviso antes do envio (RF-09 do Bearer).
+    pub fn filled_names(&self) -> Vec<String> {
+        self.names()
+            .into_iter()
+            .filter(|n| match self.secrets.get(n) {
+                Some(secret) => !secret.expose().is_empty(),
+                None => true,
+            })
+            .collect()
+    }
+}
+
+/// O que aconteceu com um segredo gravado automaticamente.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SecretAction {
+    /// Não existia ou estava vazio.
+    Created,
+    /// Existia com outro valor.
+    Updated,
+    /// Já tinha o mesmo valor.
+    Unchanged,
+}
+
+/// Tipo de um nome consultado pelo tooltip de variáveis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PeekKind {
+    Variable,
+    Secret,
+    Missing,
+}
+
+/// Resposta do tooltip: o valor só vem para variáveis; segredos vêm mascarados.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Peek {
+    pub kind: PeekKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub masked: Option<String>,
+    pub empty: bool,
 }
 
 /// O que o frontend vê de um ambiente: valores das variáveis e só os nomes dos segredos.
@@ -180,6 +226,15 @@ fn require_gitignore(root: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/// Corrige o `.gitignore` se ele não protege os segredos. `true` se corrigiu.
+pub fn ensure_gitignore(root: &Path) -> AppResult<bool> {
+    if gitignore::status(root) {
+        return Ok(false);
+    }
+    gitignore::fix(root)?;
+    Ok(true)
+}
+
 fn read_variables(root: &Path, name: &str) -> AppResult<BTreeMap<String, String>> {
     let path = env_path(root, name);
     let text = std::fs::read_to_string(&path).map_err(|e| match e.kind() {
@@ -244,11 +299,120 @@ pub fn create(root: &Path, name: &str) -> AppResult<()> {
         )));
     }
     std::fs::create_dir_all(root.join(ENVIRONMENTS_DIR)).map_err(|e| AppError::io(&e, root))?;
+    // Segredos primeiro (com o .gitignore garantido): o ambiente nasce com o
+    // `bearer_token` vazio, pronto para receber o token.
+    ensure_gitignore(root)?;
+    let secrets = SecretsFile {
+        schema_version: ENV_SCHEMA_VERSION,
+        secrets: [(bearer::BEARER_SECRET_NAME.to_string(), String::new())].into(),
+    };
+    fs_ops::write_atomic(&secrets_path(root, name), &to_file_bytes(&secrets))?;
     let file = EnvFile {
         schema_version: ENV_SCHEMA_VERSION,
         variables: BTreeMap::new(),
     };
     fs_ops::write_atomic(&path, &to_file_bytes(&file)).map(|_| ())
+}
+
+/// O que `store_secret` faria. Ambiente que ainda não existe conta como `created`.
+pub(crate) fn secret_action(
+    root: &Path,
+    env: &str,
+    key: &str,
+    value: &str,
+) -> AppResult<SecretAction> {
+    check_env_name(env)?;
+    if !env_path(root, env).exists() {
+        return Ok(SecretAction::Created);
+    }
+    if read_variables(root, env)?.contains_key(key) {
+        return Err(duplicated_as_variable(key));
+    }
+    Ok(match read_secrets(root, env)?.get(key) {
+        None => SecretAction::Created,
+        Some(v) if v.expose().is_empty() => SecretAction::Created,
+        Some(v) if v.expose() == value => SecretAction::Unchanged,
+        Some(_) => SecretAction::Updated,
+    })
+}
+
+fn duplicated_as_variable(key: &str) -> AppError {
+    AppError::DuplicatedVariable(format!(
+        "\"{key}\" já é uma variável neste ambiente. Renomeie ou remova a variável para guardar o token como segredo."
+    ))
+}
+
+/// Cria ou atualiza um único segredo, mantendo os outros. Corrige o `.gitignore`
+/// antes de gravar. Devolve a ação e se o `.gitignore` foi corrigido.
+pub(crate) fn store_secret(
+    root: &Path,
+    env: &str,
+    key: &str,
+    value: &str,
+) -> AppResult<(SecretAction, bool)> {
+    check_env_name(env)?;
+    let variables = read_variables(root, env)?;
+    if variables.contains_key(key) {
+        return Err(duplicated_as_variable(key));
+    }
+    let action = secret_action(root, env, key, value)?;
+    let fixed = ensure_gitignore(root)?;
+    if action == SecretAction::Unchanged {
+        return Ok((action, fixed));
+    }
+    let mut secrets: BTreeMap<String, String> = read_secrets(root, env)?
+        .into_iter()
+        .map(|(k, v)| (k, v.0))
+        .collect();
+    secrets.insert(key.to_string(), value.to_string());
+    let file = SecretsFile {
+        schema_version: ENV_SCHEMA_VERSION,
+        secrets,
+    };
+    fs_ops::write_atomic(&secrets_path(root, env), &to_file_bytes(&file))?;
+    Ok((action, fixed))
+}
+
+/// Máscara de segredo para o tooltip: 4 primeiros + `••••••` + 4 últimos.
+/// Valores com até 8 caracteres viram só `••••••`; vazio continua vazio.
+pub fn mask(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.is_empty() {
+        return String::new();
+    }
+    if chars.len() <= 8 {
+        return "••••••".into();
+    }
+    let head: String = chars[..4].iter().collect();
+    let tail: String = chars[chars.len() - 4..].iter().collect();
+    format!("{head}••••••{tail}")
+}
+
+/// Consulta um nome para o tooltip, sem nunca devolver o valor de um segredo.
+pub fn peek(root: &Path, env: &str, key: &str) -> AppResult<Peek> {
+    let data = load_environment(root, env)?;
+    if let Some(secret) = data.secrets.get(key) {
+        return Ok(Peek {
+            kind: PeekKind::Secret,
+            value: None,
+            masked: Some(mask(secret.expose())),
+            empty: secret.expose().is_empty(),
+        });
+    }
+    if let Some(value) = data.variables.get(key) {
+        return Ok(Peek {
+            kind: PeekKind::Variable,
+            value: Some(value.clone()),
+            masked: None,
+            empty: value.is_empty(),
+        });
+    }
+    Ok(Peek {
+        kind: PeekKind::Missing,
+        value: None,
+        masked: None,
+        empty: true,
+    })
 }
 
 /// Remove o ambiente e o arquivo de segredos dele.
@@ -513,6 +677,9 @@ mod tests {
     fn secrets_require_gitignore() {
         let dir = workspace(false);
         create(dir.path(), "hml").unwrap();
+        // Criar o ambiente corrige o .gitignore; aqui ele volta a ficar desprotegido.
+        std::fs::remove_file(dir.path().join(".gitignore")).unwrap();
+        std::fs::remove_file(dir.path().join("environments/hml.secrets.json")).unwrap();
         let err =
             save_secrets(dir.path(), "hml", [("t".into(), Some("x".into()))].into()).unwrap_err();
         assert_eq!(err.code(), "GITIGNORE_NOT_CONFIGURED");
@@ -571,6 +738,74 @@ mod tests {
         assert_eq!(
             load_environment(dir.path(), "../x").unwrap_err().code(),
             "INVALID_NAME"
+        );
+    }
+
+    #[test]
+    fn create_adds_empty_bearer_secret_and_fixes_gitignore() {
+        let dir = workspace(false);
+        create(dir.path(), "local").unwrap();
+        assert!(
+            gitignore::status(dir.path()),
+            ".gitignore corrigido ao criar"
+        );
+        let view = view(dir.path(), "local").unwrap();
+        assert_eq!(view.secret_names, vec![bearer::BEARER_SECRET_NAME]);
+        let data = load_environment(dir.path(), "local").unwrap();
+        assert_eq!(data.names(), vec![bearer::BEARER_SECRET_NAME]);
+        assert!(
+            data.filled_names().is_empty(),
+            "segredo vazio não conta como definido"
+        );
+        let gi = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+        create(dir.path(), "hml").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+            gi,
+            "não duplica a linha"
+        );
+    }
+
+    #[test]
+    fn mask_keeps_only_the_ends() {
+        assert_eq!(mask(""), "");
+        assert_eq!(mask("12345678"), "••••••");
+        assert_eq!(mask("eyJhbGciOiJIUzI1a9Fz"), "eyJh••••••a9Fz");
+        assert_eq!(mask("çãoabcdeõ"), "çãoa••••••cdeõ");
+    }
+
+    #[test]
+    fn peek_never_returns_secret_values() {
+        let dir = workspace(true);
+        create(dir.path(), "hml").unwrap();
+        save_variables(dir.path(), "hml", vars(&[("baseUrl", "https://x")])).unwrap();
+        save_secrets(
+            dir.path(),
+            "hml",
+            [
+                (
+                    "token".to_string(),
+                    Some("eyJhbGciOiJIUzI1a9Fz".to_string()),
+                ),
+                (bearer::BEARER_SECRET_NAME.to_string(), None),
+            ]
+            .into(),
+        )
+        .unwrap();
+        let var = peek(dir.path(), "hml", "baseUrl").unwrap();
+        assert_eq!(
+            (var.kind, var.value.as_deref()),
+            (PeekKind::Variable, Some("https://x"))
+        );
+        let secret = peek(dir.path(), "hml", "token").unwrap();
+        assert_eq!(secret.kind, PeekKind::Secret);
+        assert_eq!(secret.masked.as_deref(), Some("eyJh••••••a9Fz"));
+        assert!(!serde_json::to_string(&secret).unwrap().contains("eyJhbGci"));
+        let empty = peek(dir.path(), "hml", bearer::BEARER_SECRET_NAME).unwrap();
+        assert!(empty.empty && empty.kind == PeekKind::Secret);
+        assert_eq!(
+            peek(dir.path(), "hml", "nada").unwrap().kind,
+            PeekKind::Missing
         );
     }
 }

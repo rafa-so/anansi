@@ -3,6 +3,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { SvelteSet } from 'svelte/reactivity';
 import { collectionApi, folderApi, workspaceApi } from '../api/workspace';
 import { requestApi } from '../api/requests';
+import { bearerEvents, withBearerEnvironment } from '../bearer';
 import { envApi } from '../api/environments';
 import { filterTree, parentPath } from '../tree';
 import { errorMessage, isAppError, type TreeNode, type WorkspaceInfo } from '../types';
@@ -196,7 +197,9 @@ class WorkspaceState {
 
   async duplicate(path: string) {
     await this.run(async () => {
-      const { path: copy } = await requestApi.duplicate(path);
+      const result = await withBearerEnvironment((env) => requestApi.duplicate(path, env));
+      if (!result) return;
+      const copy = result.path;
       await this.refresh();
       this.selected = copy;
       await tabs.openRequest(copy);
@@ -222,3 +225,4 @@ class WorkspaceState {
 export const workspace = new WorkspaceState();
 tabs.onTreeChanged = () => void workspace.refresh();
 git.onSynced = () => workspace.reload();
+bearerEvents.onGitignoreFixed = () => void workspace.refreshGitignore();

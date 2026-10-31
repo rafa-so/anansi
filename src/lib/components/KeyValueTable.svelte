@@ -6,6 +6,7 @@
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import type { FormField, FormFieldType } from '../types';
   import { fileName } from '../request';
+  import { variableTooltip } from '../tooltip';
   import { unresolvedIn } from '../variables';
 
   let {
@@ -111,6 +112,7 @@
             bind:value={item.key}
             placeholder={keyPlaceholder}
             aria-label="{keyPlaceholder} {i + 1}"
+            use:variableTooltip={known !== null}
           /></td
         >
         {#if fileFields}
@@ -153,6 +155,7 @@
               bind:value={item.value}
               placeholder={valuePlaceholder}
               aria-label="{valuePlaceholder} {i + 1}"
+              use:variableTooltip={known !== null}
             />
           {/if}
         </td>

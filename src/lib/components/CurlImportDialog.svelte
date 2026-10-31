@@ -3,11 +3,19 @@
   import { readText } from '@tauri-apps/plugin-clipboard-manager';
   import { curlApi } from '../api/http';
   import { requestApi } from '../api/requests';
+  import { announceBearer, DEFAULT_ENVIRONMENT, describeAction, maskBearer, useEnvironment } from '../bearer';
+  import { environments } from '../state/environments.svelte';
   import { toasts } from '../state/dialogs.svelte';
   import { tabs } from '../state/tabs.svelte';
   import { ui } from '../state/ui.svelte';
   import { workspace } from '../state/workspace.svelte';
-  import { errorMessage, type RequestFile, type TreeNode } from '../types';
+  import {
+    BEARER_SECRET_NAME,
+    errorMessage,
+    type RequestFile,
+    type SecretAction,
+    type TreeNode,
+  } from '../types';
   import Modal from './Modal.svelte';
 
   let text = $state('');
@@ -16,6 +24,42 @@
   let name = $state('');
   let destination = $state(ui.curlImport.parentPath ?? workspace.tree[0]?.path ?? '');
   let timer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Opção do seletor que cria o ambiente `local` (quando ele não existe). */
+  const CREATE_LOCAL = '__create_local__';
+  let tokenEnv = $state(environments.active ?? environments.list[0] ?? CREATE_LOCAL);
+  let tokenAction = $state<SecretAction | null>(null);
+  let tokenError = $state<string | null>(null);
+
+  /** Headers Authorization com token literal (a prévia mostra mascarado). */
+  const bearerHeaders = $derived(
+    (parsed?.request.headers ?? []).filter(
+      (h) => h.key.trim().toLowerCase() === 'authorization' && maskBearer(h.value) !== h.value,
+    ),
+  );
+  const reference = `Bearer {{${BEARER_SECRET_NAME}}}`;
+  const tokenEnvName = $derived(tokenEnv === CREATE_LOCAL ? DEFAULT_ENVIRONMENT : tokenEnv);
+
+  // O que acontece com o segredo no ambiente escolhido (criado, atualizado, mantido).
+  $effect(() => {
+    const request = parsed?.request;
+    const env = tokenEnvName;
+    if (!request || bearerHeaders.length === 0) {
+      tokenAction = null;
+      tokenError = null;
+      return;
+    }
+    requestApi
+      .bearerPreview(request, env)
+      .then((action) => {
+        tokenAction = action;
+        tokenError = null;
+      })
+      .catch((e) => {
+        tokenAction = null;
+        tokenError = errorMessage(e);
+      });
+  });
 
   /** Collections e pastas, para o destino. */
   const containers = $derived.by(() => {
@@ -65,7 +109,15 @@
   async function confirm() {
     if (!parsed || !destination || !name.trim()) return;
     try {
-      const { path } = await requestApi.create(destination, { ...parsed.request, name: name.trim() });
+      let env: string | null = environments.active;
+      if (bearerHeaders.length > 0) {
+        env = tokenEnvName;
+        // Cria o `local` se preciso; sem ambiente ativo, o escolhido passa a ser o ativo.
+        if (tokenEnv === CREATE_LOCAL || !environments.active) await useEnvironment(env);
+      }
+      const result = await requestApi.create(destination, { ...parsed.request, name: name.trim() }, env);
+      const path = result.path;
+      await announceBearer(result.bearer);
       ui.curlImport = { open: false, parentPath: null };
       workspace.expand(destination);
       await workspace.refresh();
@@ -110,6 +162,32 @@
           {parsed.request.body?.type ?? 'none'}
         </p>
         {#each parsed.warnings as w (w)}<p class="warning">{w}</p>{/each}
+        {#if bearerHeaders.length}
+          <div class="bearer" data-testid="curl-bearer">
+            {#each bearerHeaders as h, i (i)}
+              <p class="mono" data-testid="curl-bearer-masked">{h.key}: {maskBearer(h.value)}</p>
+            {/each}
+            <p class="muted">
+              O token fica só nesta máquina, no segredo <code>{BEARER_SECRET_NAME}</code>; o request é gravado
+              com
+              <code>{reference}</code>.
+            </p>
+            <label>
+              <span>Guardar o token no ambiente</span>
+              <select bind:value={tokenEnv} data-testid="curl-token-env">
+                {#each environments.list as env (env)}<option value={env}>{env}</option>{/each}
+                {#if !environments.list.includes(DEFAULT_ENVIRONMENT)}
+                  <option value={CREATE_LOCAL}>Criar ambiente "{DEFAULT_ENVIRONMENT}"</option>
+                {/if}
+              </select>
+            </label>
+            {#if tokenError}
+              <p class="error" role="alert">{tokenError}</p>
+            {:else if tokenAction}
+              <p data-testid="curl-token-action">{describeAction(tokenAction, tokenEnvName)}</p>
+            {/if}
+          </div>
+        {/if}
         <label>
           <span>Nome</span>
           <input bind:value={name} data-testid="curl-name" />
@@ -130,7 +208,7 @@
     <button
       class="primary"
       onclick={confirm}
-      disabled={!parsed || !destination || !name.trim()}
+      disabled={!parsed || !destination || !name.trim() || tokenError !== null}
       data-testid="curl-confirm">Importar</button
     >
   {/snippet}
@@ -176,6 +254,13 @@
   }
   label span {
     color: var(--text-muted);
+  }
+  .bearer {
+    display: grid;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
   }
   .warning {
     background: var(--warning-bg);

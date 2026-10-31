@@ -2,9 +2,10 @@
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { httpApi } from '../api/http';
 import { requestApi } from '../api/requests';
+import { announceBearer, withBearerEnvironment } from '../bearer';
 import { cloneRequest, forSave, isDirty, newRequest } from '../request';
 import { isSameOrInside, movePath } from '../tree';
-import { errorMessage, isAppError, type HttpResponse, type RequestFile } from '../types';
+import { errorMessage, isAppError, type HttpResponse, type RequestFile, type SavedRequest } from '../types';
 import { collectUnresolved } from '../variables';
 import { dialogs, toasts } from './dialogs.svelte';
 import { environments } from './environments.svelte';
@@ -130,14 +131,24 @@ class TabsState {
         const name = await dialogs.prompt('Salvar request', 'Nome', tab.draft.name, 'Salvar');
         if (!name) return false;
         tab.draft.name = name;
-        const { path } = await requestApi.create(tab.parentPath, forSave(tab.draft));
-        tab.path = path;
-      } else {
-        const { path } = await requestApi.save(tab.path, forSave(tab.draft));
-        tab.path = path;
       }
-      tab.saved = cloneRequest(forSave(tab.draft));
+      const draft = forSave(tab.draft);
+      const parentPath = tab.parentPath;
+      const currentPath = tab.path;
+      // Token Bearer literal: o backend guarda no segredo bearer_token do ambiente.
+      const result: SavedRequest | null = await withBearerEnvironment((env) =>
+        currentPath === null
+          ? requestApi.create(parentPath!, draft, env)
+          : requestApi.save(currentPath, draft, env),
+      );
+      if (!result) return false;
+      tab.path = result.path;
+      // O request gravado pode ter mudado ({{bearer_token}} no lugar do token).
+      const stored = result.request ?? draft;
+      tab.saved = cloneRequest(stored);
+      tab.draft = cloneRequest(stored);
       tab.diskState = 'ok';
+      await announceBearer(result.bearer);
       this.onTreeChanged?.();
       return true;
     } catch (e) {
@@ -203,10 +214,16 @@ class TabsState {
   async renameRequest(path: string, name: string): Promise<string> {
     const tab = this.tabs.find((t) => t.path === path);
     const base = tab ? tab.saved : await requestApi.get(path);
-    const { path: newPath } = await requestApi.save(path, { ...base, name });
+    const result = await withBearerEnvironment((env) => requestApi.save(path, { ...base, name }, env));
+    if (!result) return path;
+    const newPath = result.path;
+    await announceBearer(result.bearer);
     if (tab) {
-      tab.saved = cloneRequest({ ...tab.saved, name });
+      const headersUntouched = JSON.stringify(tab.draft.headers) === JSON.stringify(tab.saved.headers ?? []);
+      tab.saved = cloneRequest(result.request ?? { ...tab.saved, name });
       tab.draft.name = name;
+      // Token convertido para {{bearer_token}}: leva a troca para o rascunho, se ele não mexeu nos headers.
+      if (result.bearer && headersUntouched) tab.draft.headers = cloneRequest(tab.saved).headers;
       tab.path = newPath;
     }
     return newPath;

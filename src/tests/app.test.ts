@@ -52,6 +52,7 @@ beforeEach(() => {
     changes: 0,
     ahead: 0,
     behind: 0,
+    hook: 'installed',
   };
   pushes = [];
   pulls = 0;

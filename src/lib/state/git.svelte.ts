@@ -1,7 +1,8 @@
 // Pull e push do repositório de collections (botões da barra superior).
 import { gitApi } from '../api/git';
-import { errorMessage, type GitStatus } from '../types';
-import { toasts } from './dialogs.svelte';
+import { announceBearer, withBearerEnvironment } from '../bearer';
+import { BEARER_SECRET_NAME, errorMessage, isAppError, type GitStatus } from '../types';
+import { dialogs, toasts } from './dialogs.svelte';
 import { tabs } from './tabs.svelte';
 
 class GitState {
@@ -77,7 +78,31 @@ class GitState {
     await this.push(message);
   }
 
-  private async push(message: string | null) {
+  /**
+   * Push recusado por token Bearer em texto puro: oferece "Converter agora"
+   * (token para o segredo, arquivos com {{bearer_token}}). `true` se converteu.
+   */
+  private async offerBearerConversion(): Promise<boolean> {
+    const files = await gitApi.bearerLiterals();
+    if (files.length === 0) return true;
+    const choice = await dialogs.choose(
+      'Token Bearer em texto puro',
+      `Estes arquivos têm token Bearer em texto puro e não podem ir para o git: ${files.join(', ')}. ` +
+        `Converter agora guarda o token no segredo ${BEARER_SECRET_NAME} do ambiente e grava os arquivos com Bearer {{${BEARER_SECRET_NAME}}}.`,
+      [
+        { id: 'cancel', label: 'Cancelar' },
+        { id: 'convert', label: 'Converter agora', variant: 'primary' },
+      ],
+    );
+    if (choice !== 'convert') return false;
+    const outcome = await withBearerEnvironment((env) => gitApi.convertBearer(files, env));
+    if (outcome === null) return false;
+    await announceBearer(outcome);
+    await this.onSynced?.();
+    return true;
+  }
+
+  private async push(message: string | null, retried = false): Promise<void> {
     this.busy = 'push';
     try {
       const result = await gitApi.push(message);
@@ -88,6 +113,16 @@ class GitState {
       else if (result.committed) toasts.show(`Commit enviado para ${target}.`);
       else toasts.show(`Commits enviados para ${target}.`);
     } catch (e) {
+      if (isAppError(e) && e.code === 'BEARER_LITERAL_FOUND' && !retried) {
+        this.busy = null;
+        try {
+          if (await this.offerBearerConversion()) return await this.push(message, true);
+        } catch (err) {
+          toasts.error(errorMessage(err));
+        }
+        await this.refresh();
+        return;
+      }
       toasts.error(errorMessage(e));
       await this.refresh();
     } finally {

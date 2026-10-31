@@ -7,11 +7,13 @@ pub mod scanner;
 pub mod slug;
 
 use crate::env;
+use crate::env::bearer::{self, BearerOutcome};
 use crate::error::{AppError, AppResult};
 use crate::model::schema::load;
 use crate::model::*;
 use paths::{check_length, file_name_rel, join_rel, parent_rel, resolve};
 use scanner::{is_request_file_name, scan_children, scan_collection, COLLECTION_FILE};
+use serde::Serialize;
 use slug::{existing_names, slugify, unique_name};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -20,6 +22,17 @@ pub const WORKSPACE_FILE: &str = "workspace.json";
 pub const GITATTRIBUTES_CONTENT: &str = "* text=auto eol=lf\n";
 
 const BODY_SUFFIXES: [&str; 2] = [".body.json", ".body.txt"];
+
+/// Resultado de criar ou salvar um request: o caminho, o request como foi
+/// gravado (com `{{bearer_token}}` no lugar do token) e o que aconteceu com o segredo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedRequest {
+    pub path: String,
+    pub request: RequestFile,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bearer: Option<BearerOutcome>,
+}
 
 /// Workspace aberto. Todos os caminhos recebidos são relativos à raiz, com `/`.
 #[derive(Debug, Clone)]
@@ -311,9 +324,21 @@ impl Workspace {
         Ok(RequestFile::join(disk, content))
     }
 
+    /// Cria o request. Um token Bearer literal faz o save falhar com
+    /// `BEARER_NEEDS_ENVIRONMENT`: o token nunca vai para o arquivo.
     pub fn request_create(&self, parent: &str, request: &RequestFile) -> AppResult<String> {
+        Ok(self.request_create_in_env(parent, request, None)?.path)
+    }
+
+    /// Cria o request, guardando um token Bearer literal no segredo `bearer_token` do `env`.
+    pub fn request_create_in_env(
+        &self,
+        parent: &str,
+        request: &RequestFile,
+        env: Option<&str>,
+    ) -> AppResult<SavedRequest> {
         let dir = self.container_dir(parent)?;
-        let request = Self::validated(request)?;
+        let mut request = Self::validated(request)?;
         let stem = unique_name(
             &existing_names(&dir),
             &slugify(&request.name),
@@ -322,15 +347,30 @@ impl Workspace {
         );
         let rel = join_rel(parent, &format!("{stem}.json"));
         check_length(&rel)?;
+        let bearer = bearer::extract(&self.root, &mut request, env)?;
         write_request(&dir, &stem, &request)?;
-        Ok(rel)
+        Ok(SavedRequest {
+            path: rel,
+            request,
+            bearer,
+        })
     }
 
     /// Salva o request. Se o nome mudou de slug, renomeia os arquivos e devolve o novo caminho.
     /// Um request removido do disco é recriado.
     pub fn request_save(&self, rel: &str, request: &RequestFile) -> AppResult<String> {
+        Ok(self.request_save_in_env(rel, request, None)?.path)
+    }
+
+    /// Como `request_save`, guardando um token Bearer literal no segredo do `env`.
+    pub fn request_save_in_env(
+        &self,
+        rel: &str,
+        request: &RequestFile,
+        env: Option<&str>,
+    ) -> AppResult<SavedRequest> {
         let (dir, stem) = self.request_location(rel)?;
-        let request = Self::validated(request)?;
+        let mut request = Self::validated(request)?;
         let current = dir.join(format!("{stem}.json"));
         if let Ok(text) = std::fs::read_to_string(&current) {
             if let Err(e @ AppError::UnsupportedSchemaVersion(_)) =
@@ -349,6 +389,10 @@ impl Workspace {
         let new_rel = join_rel(parent, &format!("{new_stem}.json"));
         if !new_stem.eq_ignore_ascii_case(&stem) {
             check_length(&new_rel)?;
+        }
+        // Antes de mexer nos arquivos do request: se o segredo falhar, nada muda.
+        let bearer = bearer::extract(&self.root, &mut request, env)?;
+        if !new_stem.eq_ignore_ascii_case(&stem) {
             for suffix in std::iter::once(".json").chain(BODY_SUFFIXES) {
                 let from = dir.join(format!("{stem}{suffix}"));
                 if from.exists() {
@@ -357,7 +401,49 @@ impl Workspace {
             }
         }
         write_request(&dir, &new_stem, &request)?;
-        Ok(new_rel)
+        Ok(SavedRequest {
+            path: new_rel,
+            request,
+            bearer,
+        })
+    }
+
+    /// Converte requests com token Bearer literal (botão "Converter agora" do push).
+    /// Todos precisam ter o mesmo token, porque o segredo `bearer_token` guarda um só.
+    pub fn convert_bearer(
+        &self,
+        rels: &[String],
+        env: Option<&str>,
+    ) -> AppResult<Option<BearerOutcome>> {
+        let mut loaded = Vec::new();
+        let mut tokens: Vec<String> = Vec::new();
+        for rel in rels {
+            let request = self.request_get(rel)?;
+            if let Some(token) = bearer::single_token(&request)
+                .map_err(|e| AppError::InvalidRequest(format!("{rel}: {e}")))?
+            {
+                if !tokens.contains(&token) {
+                    tokens.push(token);
+                }
+                loaded.push((rel, request));
+            }
+        }
+        if tokens.len() > 1 {
+            let names: Vec<&str> = loaded.iter().map(|(r, _)| r.as_str()).collect();
+            return Err(AppError::InvalidRequest(format!(
+                "Estes requests têm tokens Bearer diferentes: {}. O segredo {} guarda um só; abra e salve cada um no ambiente certo.",
+                names.join(", "),
+                bearer::BEARER_SECRET_NAME
+            )));
+        }
+        let mut first: Option<BearerOutcome> = None;
+        for (rel, request) in loaded {
+            let saved = self.request_save_in_env(rel, &request, env)?;
+            if first.is_none() {
+                first = saved.bearer;
+            }
+        }
+        Ok(first)
     }
 
     pub fn request_delete(&self, rel: &str) -> AppResult<()> {
@@ -373,10 +459,12 @@ impl Workspace {
     }
 
     /// Duplica com o sufixo " (cópia)" no nome, na mesma pasta (RF-18).
-    pub fn request_duplicate(&self, rel: &str) -> AppResult<String> {
+    pub fn request_duplicate(&self, rel: &str, env: Option<&str>) -> AppResult<String> {
         let mut request = self.request_get(rel)?;
         request.name = format!("{} (cópia)", request.name);
-        self.request_create(parent_rel(rel), &request)
+        Ok(self
+            .request_create_in_env(parent_rel(rel), &request, env)?
+            .path)
     }
 
     fn validated(request: &RequestFile) -> AppResult<RequestFile> {

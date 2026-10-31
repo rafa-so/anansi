@@ -9,9 +9,15 @@
 //! - Pull: `git pull --rebase --autostash` na branch atual. Se der conflito, o
 //!   rebase é abortado e nada muda no disco.
 //! - Push: `git add --all -- .`, `git commit -- .`, pull (como acima) e `git push`.
+//!   Antes do `add`, recusa arquivos com token Bearer em texto puro.
+//! - Hook: o `status` instala o `pre-commit` do anansi (ver `hooks`), que cobre
+//!   os commits feitos fora do app.
 
-use crate::env::gitignore;
+pub mod hooks;
+
+use crate::env::{bearer, gitignore};
 use crate::error::{AppError, AppResult};
+use hooks::HookState;
 use serde::Serialize;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -40,6 +46,8 @@ pub struct GitStatus {
     pub ahead: usize,
     /// Commits do remote que não estão aqui (desde o último fetch).
     pub behind: usize,
+    /// Hook `pre-commit` do anansi (proteção do Bearer Token fora do app).
+    pub hook: HookState,
 }
 
 impl GitStatus {
@@ -51,6 +59,7 @@ impl GitStatus {
             changes: 0,
             ahead: 0,
             behind: 0,
+            hook: HookState::Unavailable,
         }
     }
 }
@@ -142,7 +151,56 @@ pub fn status(root: &Path) -> AppResult<GitStatus> {
             ".",
         ],
     )?;
-    Ok(parse_status(&porcelain))
+    let mut status = parse_status(&porcelain);
+    status.hook = hooks::ensure_pre_commit(root);
+    Ok(status)
+}
+
+/// Nomes separados por NUL (saída com `-z`).
+fn nul_list(text: &str) -> impl Iterator<Item = &str> {
+    text.split('\0').filter(|s| !s.is_empty())
+}
+
+/// Arquivos `.json` do workspace, alterados ou novos, com token Bearer em texto puro.
+/// Caminhos relativos à raiz do workspace, com `/`.
+pub fn bearer_literals(root: &Path) -> AppResult<Vec<String>> {
+    let worktree = git(
+        root,
+        &[
+            "ls-files",
+            "-z",
+            "--modified",
+            "--others",
+            "--exclude-standard",
+            "--",
+            ".",
+        ],
+    )?;
+    let staged = git(
+        root,
+        &[
+            "diff",
+            "--cached",
+            "--name-only",
+            "--relative",
+            "-z",
+            "--",
+            ".",
+        ],
+    )?;
+    let mut found: Vec<String> = nul_list(&worktree)
+        .chain(nul_list(&staged))
+        .filter(|f| f.to_ascii_lowercase().ends_with(".json"))
+        .filter(|f| {
+            std::fs::read_to_string(root.join(f))
+                .map(|text| bearer::json_has_literal(&text))
+                .unwrap_or(false)
+        })
+        .map(str::to_string)
+        .collect();
+    found.sort();
+    found.dedup();
+    Ok(found)
 }
 
 /// Interpreta o `git status --porcelain=v2 --branch`.
@@ -292,6 +350,14 @@ pub fn push(root: &Path, message: Option<&str>) -> AppResult<PushResult> {
                     .into(),
             ));
         }
+        let literals = bearer_literals(root)?;
+        if !literals.is_empty() {
+            return Err(AppError::BearerLiteralFound(format!(
+                "Há token Bearer em texto puro em: {}. Use \"Converter agora\" para guardá-lo no segredo {} antes de enviar.",
+                literals.join(", "),
+                bearer::BEARER_SECRET_NAME
+            )));
+        }
         git(root, &["add", "--all", "--", "."])?;
         git(root, &["commit", "-m", message, "--", "."])?;
         committed = true;
@@ -342,6 +408,7 @@ mod tests {
                 changes: 2,
                 ahead: 2,
                 behind: 3,
+                hook: HookState::Unavailable,
             }
         );
     }

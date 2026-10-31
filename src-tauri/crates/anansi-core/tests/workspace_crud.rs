@@ -303,7 +303,7 @@ fn duplicates_request_with_body() {
         content: "{\"a\":1}".into(),
     };
     let rel = ws.request_create("c", &req).unwrap();
-    let copy = ws.request_duplicate(&rel).unwrap();
+    let copy = ws.request_duplicate(&rel, None).unwrap();
     assert_eq!(copy, "c/criar-produto-copia.json");
     let loaded = ws.request_get(&copy).unwrap();
     assert_eq!(loaded.name, "Criar produto (cópia)");

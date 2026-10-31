@@ -1,7 +1,7 @@
 //! Ambientes, segredos e `.gitignore` (RF-10 a RF-14).
 
 use crate::{prefs, state::AppState};
-use anansi_core::env::{self, gitignore, EnvView};
+use anansi_core::env::{self, gitignore, EnvView, Peek};
 use anansi_core::AppResult;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -89,13 +89,20 @@ pub async fn env_set_active(
     Ok(())
 }
 
-/// Nomes conhecidos (variáveis + segredos), para destacar os não resolvidos.
+/// Nomes conhecidos (variáveis + segredos preenchidos), para destacar os não
+/// resolvidos. Um segredo vazio (ex.: `bearer_token` recém-criado) conta como não definido.
 #[tauri::command]
 pub async fn env_variable_names(
     state: State<'_, AppState>,
     name: String,
 ) -> AppResult<Vec<String>> {
-    Ok(env::load_environment(state.workspace()?.root(), &name)?.names())
+    Ok(env::load_environment(state.workspace()?.root(), &name)?.filled_names())
+}
+
+/// Tooltip de variáveis: valor de variável, segredo só mascarado.
+#[tauri::command]
+pub async fn env_peek(state: State<'_, AppState>, name: String, key: String) -> AppResult<Peek> {
+    env::peek(state.workspace()?.root(), &name, &key)
 }
 
 #[tauri::command]

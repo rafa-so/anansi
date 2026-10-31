@@ -1,5 +1,6 @@
 //! "Copiar como cURL" (RF-15, Seção 11.1).
 
+use crate::env::bearer;
 use crate::env::resolver::{Report, Resolver};
 use crate::env::EnvironmentData;
 use crate::http::{automatic_content_type, encode_form};
@@ -87,12 +88,16 @@ pub fn export(
     format: CurlFormat,
 ) -> Exported {
     let mut report = Report::default();
+    // Um rascunho ainda não salvo pode ter o token literal: conta como segredo.
+    let literal_bearer = bearer::has_literal(request);
     let source = if resolve {
         let (resolved, r) = Resolver::new(env).resolve_request(request);
         report = r;
         resolved
     } else {
         let mut copy = request.clone();
+        // A versão para compartilhar nunca leva o token: vira `{{bearer_token}}`.
+        bearer::replace_literals(&mut copy);
         copy.query.retain(|q| q.enabled);
         copy.headers.retain(|h| h.enabled);
         if let Body::FormUrlencoded { fields } = &mut copy.body {
@@ -175,7 +180,7 @@ pub fn export(
     }
     Exported {
         curl,
-        contains_secrets: report.used_secret,
+        contains_secrets: report.used_secret || (resolve && literal_bearer),
     }
 }
 
@@ -340,5 +345,28 @@ mod tests {
         let curl = export(&r, None, false, CurlFormat::Bash).curl;
         assert!(curl.contains("-H 'Content-Type: application/x-www-form-urlencoded'"));
         assert!(curl.ends_with("--data-raw 'a=1+2'"));
+    }
+
+    #[test]
+    fn literal_bearer_never_goes_in_the_shareable_copy() {
+        let mut req = request();
+        req.headers.push(KeyValue {
+            key: "Authorization".into(),
+            value: "Bearer eyJsegredo".into(),
+            enabled: true,
+        });
+        let shared = export(&req, None, false, CurlFormat::Bash);
+        assert!(!shared.curl.contains("eyJsegredo"));
+        assert!(shared
+            .curl
+            .contains("Authorization: Bearer {{bearer_token}}"));
+        assert!(!shared.contains_secrets);
+
+        let with_values = export(&req, None, true, CurlFormat::Bash);
+        assert!(with_values.curl.contains("Bearer eyJsegredo"));
+        assert!(
+            with_values.contains_secrets,
+            "token literal conta como segredo"
+        );
     }
 }

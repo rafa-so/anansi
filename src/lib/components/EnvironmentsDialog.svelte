@@ -38,6 +38,18 @@
       toasts.error(errorMessage(e));
     }
     loadedSnapshot = JSON.stringify({ vars, secrets });
+    focusTarget();
+  }
+
+  /** Aberto pelo "Definir" do tooltip: deixa o segredo pronto para digitar o valor. */
+  function focusTarget() {
+    const key = ui.environmentsTarget;
+    if (!key) return;
+    ui.environmentsTarget = null;
+    if (vars.some((v) => v.key === key)) return;
+    const existing = secrets.find((s) => s.originalKey === key);
+    if (existing) existing.value = '';
+    else secrets.push({ key, originalKey: null, value: '', revealed: false });
   }
 
   $effect(() => {
@@ -70,6 +82,8 @@
     if (!name) return;
     try {
       await envApi.create(name);
+      // O ambiente novo já vem com o segredo bearer_token (e o .gitignore pode ter sido corrigido).
+      await workspace.refreshGitignore();
       await environments.load();
       selected = name;
     } catch (e) {

@@ -1,6 +1,7 @@
 //! Pull e push do repositório do workspace (botões da barra superior).
 
 use crate::state::AppState;
+use anansi_core::env::bearer::BearerOutcome;
 use anansi_core::git::{self, GitStatus, PullResult, PushResult};
 use anansi_core::{AppError, AppResult};
 use std::path::PathBuf;
@@ -37,4 +38,22 @@ pub async fn git_push(
 ) -> AppResult<PushResult> {
     let root = state.workspace()?.root().to_path_buf();
     blocking(root, move |root| git::push(root, message.as_deref())).await
+}
+
+/// Arquivos alterados com token Bearer em texto puro (o push recusa enquanto houver).
+#[tauri::command]
+pub async fn git_bearer_literals(state: State<'_, AppState>) -> AppResult<Vec<String>> {
+    let root = state.workspace()?.root().to_path_buf();
+    blocking(root, git::bearer_literals).await
+}
+
+/// "Converter agora": guarda o token no segredo `bearer_token` de `env` e
+/// regrava os requests com `{{bearer_token}}`.
+#[tauri::command]
+pub async fn git_convert_bearer(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+    env: Option<String>,
+) -> AppResult<Option<BearerOutcome>> {
+    state.workspace()?.convert_bearer(&paths, env.as_deref())
 }

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { EnvView } from '../types';
+import type { EnvView, Peek } from '../types';
 
 export const envApi = {
   list: () => invoke<string[]>('env_list'),
@@ -15,6 +15,8 @@ export const envApi = {
   getActive: () => invoke<string | null>('env_get_active'),
   setActive: (name: string | null) => invoke<void>('env_set_active', { name }),
   variableNames: (name: string) => invoke<string[]>('env_variable_names', { name }),
+  /** Tooltip: valor de variável; segredo só mascarado. */
+  peek: (name: string, key: string) => invoke<Peek>('env_peek', { name, key }),
   gitignoreStatus: () => invoke<{ ok: boolean }>('gitignore_status'),
   gitignoreFix: () => invoke<void>('gitignore_fix'),
 };
