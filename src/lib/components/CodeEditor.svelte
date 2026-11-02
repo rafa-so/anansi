@@ -22,6 +22,7 @@
     defaultHighlightStyle,
   } from '@codemirror/language';
   import { json } from '@codemirror/lang-json';
+  import { variableHoverTooltip } from '../tooltip';
   import { findPlaceholders } from '../variables';
 
   type Props = {
@@ -65,7 +66,7 @@
       }
       return builder.finish();
     };
-    return ViewPlugin.fromClass(
+    const highlighter = ViewPlugin.fromClass(
       class {
         decorations: DecorationSet;
         constructor(v: EditorView) {
@@ -77,6 +78,8 @@
       },
       { decorations: (p) => p.decorations },
     );
+    // Passar o mouse sobre um {{nome}} mostra o valor (segredo mascarado).
+    return [highlighter, variableHoverTooltip()];
   }
 
   const theme = EditorView.theme({

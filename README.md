@@ -74,18 +74,21 @@ A versão fica em `src-tauri/tauri.conf.json` e no `package.json`; atualize as d
 1. Abra a pasta do `minhas-collections` (na primeira vez, o app oferece inicializar o workspace).
 2. "+ Collection" cria uma collection; o botão direito na árvore cria pastas e requests, renomeia, duplica, copia como cURL e remove.
 3. **Ambientes…** (barra superior) cria os ambientes (`local`, `hml`, `prd`). Variáveis vão para `environments/<ambiente>.json` (versionado); segredos, como tokens e chaves de API, vão para `environments/<ambiente>.secrets.json`, que fica só na sua máquina. Escolha o ambiente ativo no seletor ao lado.
-4. Use `{{nome}}` na URL, nos params, nos headers e no body. Nomes que não existem no ambiente ativo ficam em vermelho, e o app avisa antes de enviar.
-5. `Ctrl+Enter` envia e `Esc` cancela. A resposta aparece embaixo (o divisor é arrastável); "Salvar…" grava o body completo em arquivo.
-6. **Importar cURL** (rodapé da árvore) aceita o formato bash: "Copy as cURL (bash)" do Chrome/Edge ou o cURL do Postman.
-7. Atalhos: `Ctrl+S` salva, `Ctrl+N` cria um request, `Ctrl+W` fecha a aba, `Ctrl+P` busca na árvore, `Ctrl+Tab` troca de aba.
-8. **↓ Pull** e **↑ Push** (ao lado do nome do workspace) sincronizam com o git, sempre na branch em que o repositório está:
+4. Use `{{nome}}` na URL, nos params, nos headers e no body. Nomes que não existem no ambiente ativo (ou segredos vazios) ficam em vermelho, e o app avisa antes de enviar. Ao passar o mouse (ou focar) num campo com `{{nome}}`, um tooltip mostra o valor: variáveis por inteiro, segredos mascarados (`eyJh••••••a9Fz`) com **Mostrar** e **Copiar**, e nomes não definidos com **Definir**, que abre Ambientes.
+5. **Bearer Token:** o token nunca vai para o git. Ao salvar um request (ou importar um cURL) com `Authorization: Bearer <token>`, o token vai para o segredo `bearer_token` do ambiente ativo e o arquivo do request fica com `Bearer {{bearer_token}}`. Todos os requests com essa referência usam o mesmo token, e cada ambiente (`local`, `hml`, `prd`) tem o seu. Sem ambiente ativo, o app pergunta onde guardar (ou cria o `local`). Todo ambiente novo já nasce com o segredo `bearer_token` vazio. Se o `.gitignore` não protege os segredos, ele é corrigido sozinho, com aviso.
+6. `Ctrl+Enter` envia e `Esc` cancela. A resposta aparece embaixo (o divisor é arrastável); "Salvar…" grava o body completo em arquivo.
+7. **Importar cURL** (rodapé da árvore) aceita o formato bash: "Copy as cURL (bash)" do Chrome/Edge ou o cURL do Postman.
+8. Atalhos: `Ctrl+S` salva, `Ctrl+N` cria um request, `Ctrl+W` fecha a aba, `Ctrl+P` busca na árvore, `Ctrl+Tab` troca de aba.
+9. **↓ Pull** e **↑ Push** (ao lado do nome do workspace) sincronizam com o git, sempre na branch em que o repositório está:
    - Pull roda `git pull --rebase --autostash`: traz os commits do remote sem perder o que você ainda não commitou.
    - Push commita tudo o que mudou no workspace (`git add --all` só na pasta do workspace), traz o remote e envia. Se houver alterações, o app pede o título do commit e oferece salvar as abas pendentes; sem alterações, só envia os commits que faltam.
    - Os números nos botões mostram os commits para puxar (desde o último fetch) e as alterações e commits para enviar.
    - Em conflito, o rebase é abortado e nada muda no disco; resolva pelo terminal ou editor e tente de novo. O push recusa commitar se o `.gitignore` não protege os segredos.
+   - O push também recusa arquivos com token Bearer em texto puro (por exemplo, um request antigo ou editado fora do app) e oferece **Converter agora**, que guarda o token no segredo `bearer_token` e regrava os arquivos com `{{bearer_token}}`.
+   - Commits feitos fora do app (terminal, VS Code) também são protegidos: o anansi instala um hook `pre-commit` no repositório (`.git/hooks/pre-commit`, ou no `core.hooksPath`) que bloqueia token Bearer em texto puro e arquivos `*.secrets.json`. Um `pre-commit` que já exista nunca é sobrescrito (o botão de push avisa). Para pular uma vez: `git commit --no-verify`.
    - Usa o `git` instalado na máquina, com as credenciais que já estão configuradas (Git Credential Manager ou chave SSH).
-9. Alterações feitas por fora (git pull, editor) aparecem sozinhas. Se o watcher não perceber (ex.: unidade de rede), use ⟳ (Recarregar workspace).
-10. ⚙ (Preferências) define o padrão de verificação de TLS e o timeout. Cada request pode mudar isso na aba **Configurações**.
+10. Alterações feitas por fora (git pull, editor) aparecem sozinhas. Se o watcher não perceber (ex.: unidade de rede), use ⟳ (Recarregar workspace).
+11. ⚙ (Preferências) define o padrão de verificação de TLS e o timeout. Cada request pode mudar isso na aba **Configurações**.
 
 No body **Form URL-encoded**, cada campo pode ser **Texto** ou **Arquivo** (coluna Tipo). No tipo Arquivo, "Escolher…" abre o seletor e o valor guarda o caminho do arquivo na sua máquina (aceita `{{nome}}`). Com algum arquivo habilitado, o request vai como `multipart/form-data` (o app gera o `boundary` e substitui o Content-Type dos headers) e o "Copiar como cURL" usa `-F`. Como o caminho é local, quem usar a collection em outra máquina precisa escolher o arquivo de novo ou usar uma variável de ambiente no caminho.
 

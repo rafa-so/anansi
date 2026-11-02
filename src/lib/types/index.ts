@@ -104,6 +104,9 @@ export type GlobalPrefs = { defaultVerifyTls: boolean; defaultTimeoutMs: number 
 /** `ready`: dá para usar pull e push; os outros desabilitam os botões. */
 export type GitAvailability = 'ready' | 'not-a-repo' | 'git-missing';
 
+/** Hook `pre-commit` do anansi no repositório (bloqueia token Bearer em commits feitos fora do app). */
+export type HookState = 'installed' | 'custom' | 'unavailable';
+
 export type GitStatus = {
   availability: GitAvailability;
   branch: string | null;
@@ -111,8 +114,30 @@ export type GitStatus = {
   changes: number;
   ahead: number;
   behind: number;
+  hook: HookState;
 };
 
 export type GitPullResult = { updated: boolean; status: GitStatus };
 
 export type GitPushResult = { committed: boolean; pushed: boolean; status: GitStatus };
+
+// ----- Bearer Token como segredo de ambiente (docs/bearer-token-local/SPEC.md) -----
+
+/** Nome do segredo que guarda o token Bearer. */
+export const BEARER_SECRET_NAME = 'bearer_token';
+
+/** O que aconteceu com o segredo `bearer_token`. */
+export type SecretAction = 'created' | 'updated' | 'unchanged';
+
+export type BearerOutcome = { env: string; action: SecretAction; gitignoreFixed: boolean };
+
+/** Resposta de `request_create`/`request_save`: o request como foi gravado. */
+export type SavedRequest = { path: string; request: RequestFile; bearer?: BearerOutcome };
+
+/** Tooltip de variáveis: segredo nunca vem com o valor, só mascarado. */
+export type Peek = {
+  kind: 'variable' | 'secret' | 'missing';
+  value?: string;
+  masked?: string;
+  empty: boolean;
+};

@@ -98,6 +98,34 @@ describe('execução de requests', () => {
     expect(await textOf('response-body')).toContain('12345678');
   });
 
+  it('importa um cURL com Bearer: o token vai para o segredo e o request fica com {{bearer_token}}', async () => {
+    await (await byTestId('import-curl')).click();
+    await (
+      await byTestId('curl-text')
+    ).setValue("curl '{{baseUrlStore}}/echo' -H 'Authorization: Bearer e2e-token-123'");
+    await (await byTestId('curl-bearer')).waitForDisplayed();
+    expect(await textOf('curl-bearer-masked')).toContain('Bearer e2e-…');
+    await browser.waitUntil(async () => (await textOf('curl-token-action')).includes('criado'));
+    await (await byTestId('curl-name')).setValue('Echo com token');
+    await (await byTestId('curl-confirm')).click();
+    const file = path.join(root(), 'store-api', 'echo-com-token.json');
+    await browser.waitUntil(() => fs.existsSync(file));
+    const saved = fs.readFileSync(file, 'utf8');
+    expect(saved).toContain('Bearer {{bearer_token}}');
+    expect(saved).not.toContain('e2e-token-123');
+    expect(fs.readFileSync(path.join(root(), 'environments', 'local.secrets.json'), 'utf8')).toContain(
+      'e2e-token-123',
+    );
+    await pressCtrl('Enter');
+    await (await byTestId('response-status')).waitForDisplayed();
+    expect(await textOf('response-body')).toContain('Bearer e2e-token-123');
+    // Os avisos (canto inferior direito) cobririam o rodapé do diálogo do próximo cenário.
+    await browser.waitUntil(
+      async () => (await browser.execute(() => document.querySelectorAll('.toast').length)) === 0,
+      { timeout: 10_000, timeoutMsg: 'os avisos não sumiram' },
+    );
+  });
+
   it('cadastra uma variável na tela de ambientes', async () => {
     await (await byTestId('open-environments')).click();
     await (await byTestId('environments-dialog')).waitForDisplayed();

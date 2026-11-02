@@ -20,6 +20,9 @@
         `Commitar e enviar para ${branch}`,
         status?.changes ? `${status.changes} arquivo(s) alterado(s)` : '',
         status?.ahead ? `${status.ahead} commit(s) ainda não enviados` : '',
+        status?.hook === 'custom'
+          ? 'Atenção: o repositório tem um hook pre-commit próprio, então a verificação de token Bearer do anansi não roda nos commits feitos fora do app'
+          : '',
       ]
         .filter(Boolean)
         .join(' · '),

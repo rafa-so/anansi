@@ -5,6 +5,7 @@
   import { environments } from '../state/environments.svelte';
   import { tabs, type Tab } from '../state/tabs.svelte';
   import { HTTP_METHODS } from '../types';
+  import { variableTooltip } from '../tooltip';
   import { collectUnresolved, unresolvedIn } from '../variables';
   import BodyEditor from './BodyEditor.svelte';
   import ContextMenu from './ContextMenu.svelte';
@@ -97,6 +98,7 @@
       aria-invalid={urlMissing.length > 0}
       spellcheck="false"
       data-testid="url"
+      use:variableTooltip
     />
     {#if tab.executing}
       <button onclick={() => tabs.cancel(tab.id)} data-testid="cancel-send">Cancelar</button>

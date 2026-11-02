@@ -41,6 +41,12 @@ pub enum AppError {
     IoError(String),
     #[error("{0}")]
     GitError(String),
+    #[error("{0}")]
+    InvalidRequest(String),
+    #[error("{0}")]
+    BearerNeedsEnvironment(String),
+    #[error("{0}")]
+    BearerLiteralFound(String),
 }
 
 impl AppError {
@@ -63,6 +69,9 @@ impl AppError {
             AppError::Cancelled(_) => "CANCELLED",
             AppError::IoError(_) => "IO_ERROR",
             AppError::GitError(_) => "GIT_ERROR",
+            AppError::InvalidRequest(_) => "INVALID_REQUEST",
+            AppError::BearerNeedsEnvironment(_) => "BEARER_NEEDS_ENVIRONMENT",
+            AppError::BearerLiteralFound(_) => "BEARER_LITERAL_FOUND",
         }
     }
 
@@ -121,6 +130,9 @@ mod tests {
             AppError::Cancelled(String::new()),
             AppError::IoError(String::new()),
             AppError::GitError(String::new()),
+            AppError::InvalidRequest(String::new()),
+            AppError::BearerNeedsEnvironment(String::new()),
+            AppError::BearerLiteralFound(String::new()),
         ];
         for err in all {
             let json = serde_json::to_value(&err).unwrap();
