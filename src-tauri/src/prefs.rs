@@ -8,7 +8,7 @@ use anansi_core::http::HttpDefaults;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 
 pub const LAST_WORKSPACE: &str = "lastWorkspace";
@@ -23,6 +23,37 @@ fn store_path() -> PathBuf {
         }
     }
     PathBuf::from("prefs.json")
+}
+
+/// Identifier das versões até a 0.3.1, que gravavam as preferências em outra pasta.
+const LEGACY_IDENTIFIER: &str = "io.github.your-username.anansi";
+
+/// Copia o `prefs.json` da pasta do identifier antigo, se a pasta atual ainda
+/// não tiver um. Roda no `setup`, antes de qualquer leitura do store.
+pub fn migrate_legacy<R: Runtime>(app: &AppHandle<R>) {
+    if store_path().is_absolute() {
+        return;
+    }
+    let Ok(dir) = app.path().app_data_dir() else {
+        return;
+    };
+    let target = dir.join(store_path());
+    let Some(legacy) = dir
+        .parent()
+        .map(|p| p.join(LEGACY_IDENTIFIER).join(store_path()))
+    else {
+        return;
+    };
+    if target.exists() || !legacy.exists() {
+        return;
+    }
+    let copied = std::fs::create_dir_all(&dir).and_then(|_| std::fs::copy(&legacy, &target));
+    if let Err(e) = copied {
+        eprintln!(
+            "anansi: não foi possível migrar as preferências de {}: {e}",
+            legacy.display()
+        );
+    }
 }
 
 /// Workspace a abrir no início em testes E2E (só em debug).
