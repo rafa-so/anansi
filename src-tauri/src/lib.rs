@@ -14,6 +14,10 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .manage(AppState::default())
+        .setup(|app| {
+            prefs::migrate_legacy(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::workspace::workspace_open,
             commands::workspace::workspace_init,
