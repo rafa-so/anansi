@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './ipc';
 import type { EnvView, Peek } from '../types';
 
 export const envApi = {

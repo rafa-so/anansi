@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './ipc';
 import type { RequestFile, SavedRequest, SecretAction } from '../types';
 
 export const requestApi = {

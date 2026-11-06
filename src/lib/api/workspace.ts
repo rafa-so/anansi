@@ -1,5 +1,5 @@
 // Wrappers tipados dos comandos do backend: o único ponto de contato com o invoke.
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './ipc';
 import type { TreeNode, WorkspaceInfo } from '../types';
 
 export const workspaceApi = {

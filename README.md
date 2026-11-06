@@ -33,6 +33,13 @@ npm run tauri dev      # abre o app com hot reload
 
 A primeira compilação do Rust demora alguns minutos; as seguintes são incrementais.
 
+### Debug
+
+- **DevTools:** com o app aberto pelo `npm run tauri dev`, use `Ctrl+Shift+I` (ou botão direito → Inspecionar fora da árvore) para abrir o DevTools do WebView2. A aba Console mostra os logs abaixo; a aba Sources permite pôr breakpoints nos `.svelte`/`.ts` (há source maps).
+- **Log de IPC:** no `tauri dev`, cada chamada ao backend aparece no console como `[ipc] request_move ✓ 12ms`, com argumentos e resultado, ou `[ipc] request_move ✗` com o erro. Para desligar, rode no console `localStorage['anansi:debug-ipc'] = '0'`; para ligar num build de release, `= '1'` (remova a chave para voltar ao padrão).
+- **Erros não tratados:** exceções e promises rejeitadas sem `catch` viram um toast "Erro inesperado: …" e são logadas como `[anansi] erro não tratado`, em vez de sumir em silêncio.
+- **Backend (Rust):** `eprintln!`/`dbg!` nos comandos aparecem no terminal onde o `tauri dev` está rodando. Para depurar a lógica de `anansi-core` sem abrir o app, rode o teste específico: `cargo test --manifest-path src-tauri/Cargo.toml -p anansi-core moves_request -- --nocapture`.
+
 ## Testes
 
 | Comando             | O que roda                                                                                                                         |
