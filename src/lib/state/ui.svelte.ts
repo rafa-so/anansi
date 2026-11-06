@@ -6,9 +6,11 @@ class UiState {
   environmentsTarget = $state<string | null>(null);
   curlImport = $state<{ open: boolean; parentPath: string | null }>({ open: false, parentPath: null });
   prefsOpen = $state(false);
+  /** Request sendo movido pelo "Mover para…" (`null` com o diálogo fechado). */
+  moveRequest = $state<{ path: string; name: string } | null>(null);
 
   get anyOpen() {
-    return this.environmentsOpen || this.curlImport.open || this.prefsOpen;
+    return this.environmentsOpen || this.curlImport.open || this.prefsOpen || this.moveRequest !== null;
   }
 }
 

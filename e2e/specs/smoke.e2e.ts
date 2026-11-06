@@ -77,4 +77,23 @@ describe('anansi', () => {
     expect(await treePaths()).toEqual(['e2e-api', 'e2e-api/acoes', 'e2e-api/acoes/verificar-saude.json']);
     await search.clearValue();
   });
+
+  it('move o request para outra pasta pelo "Mover para…"', async () => {
+    await openContextMenu('e2e-api/acoes/verificar-saude.json');
+    await menuItem('menu-move');
+    const search = await byTestId('move-search');
+    await expect(search).toBeFocused();
+    await search.setValue('e2e');
+    const current = await $('[data-testid="move-option"][data-path="e2e-api/acoes"]');
+    await expect(current).toHaveAttribute('aria-disabled', 'true');
+    await (await $('[data-testid="move-option"][data-path="e2e-api"]')).click();
+    await (await byTestId('move-confirm')).click();
+
+    const moved = path.join(root(), 'e2e-api', 'verificar-saude.json');
+    await browser.waitUntil(() => fs.existsSync(moved));
+    expect(fs.existsSync(path.join(root(), 'e2e-api', 'acoes', 'verificar-saude.json'))).toBe(false);
+    const node = await treeNode('e2e-api/verificar-saude.json');
+    await node.waitForDisplayed();
+    await expect(node).toHaveElementClass('selected');
+  });
 });

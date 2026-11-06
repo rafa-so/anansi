@@ -134,6 +134,9 @@ export type BearerOutcome = { env: string; action: SecretAction; gitignoreFixed:
 /** Resposta de `request_create`/`request_save`: o request como foi gravado. */
 export type SavedRequest = { path: string; request: RequestFile; bearer?: BearerOutcome };
 
+/** Resultado de mover um request: `renamed` quando o arquivo ganhou sufixo por conflito no destino. */
+export type MovedRequest = { path: string; renamed: boolean };
+
 /** Tooltip de variáveis: segredo nunca vem com o valor, só mascarado. */
 export type Peek = {
   kind: 'variable' | 'secret' | 'missing';

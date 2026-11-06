@@ -35,6 +35,7 @@ pub fn run() {
             commands::requests::request_save,
             commands::requests::request_delete,
             commands::requests::request_duplicate,
+            commands::requests::request_move,
             commands::requests::bearer_preview,
             commands::environments::env_list,
             commands::environments::env_get,

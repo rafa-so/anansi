@@ -13,6 +13,7 @@
   import CurlImportDialog from './lib/components/CurlImportDialog.svelte';
   import PreferencesDialog from './lib/components/PreferencesDialog.svelte';
   import CommitDialog from './lib/components/CommitDialog.svelte';
+  import MoveRequestDialog from './lib/components/MoveRequestDialog.svelte';
   import { workspace } from './lib/state/workspace.svelte';
   import { tabs } from './lib/state/tabs.svelte';
   import { dialogs } from './lib/state/dialogs.svelte';
@@ -124,6 +125,7 @@
 {#if ui.environmentsOpen}<EnvironmentsDialog />{/if}
 {#if ui.curlImport.open}<CurlImportDialog />{/if}
 {#if ui.prefsOpen}<PreferencesDialog />{/if}
+{#if ui.moveRequest}<MoveRequestDialog path={ui.moveRequest.path} name={ui.moveRequest.name} />{/if}
 {#if git.commitOpen}<CommitDialog />{/if}
 <ConfirmDialog />
 <Toasts />

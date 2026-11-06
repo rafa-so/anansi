@@ -57,3 +57,28 @@ export function movePath(path: string, from: string, to: string): string {
 export function countRequests(node: TreeNode): number {
   return node.kind === 'request' ? 1 : node.children.reduce((sum, c) => sum + countRequests(c), 0);
 }
+
+/** Pasta que pode receber requests, com o caminho como aparece na interface. */
+export type ContainerOption = { path: string; label: string };
+
+/**
+ * Collections e pastas em ordem de árvore, cada uma com o caminho exibido
+ * (`Store API / products / reviews`): a collection pelo nome exibido e as pastas pelo nome.
+ */
+export function listContainers(nodes: TreeNode[]): ContainerOption[] {
+  const out: ContainerOption[] = [];
+  const visit = (node: TreeNode, prefix: string) => {
+    if (node.kind === 'request') return;
+    const label = prefix ? `${prefix} / ${node.name}` : node.name;
+    out.push({ path: node.path, label });
+    for (const child of node.children) visit(child, label);
+  };
+  for (const node of nodes) visit(node, '');
+  return out;
+}
+
+/** O próprio caminho e todos os acima dele: `a/b/c` → `a`, `a/b`, `a/b/c`. */
+export function selfAndAncestors(path: string): string[] {
+  const parts = path.split('/');
+  return parts.map((_, i) => parts.slice(0, i + 1).join('/'));
+}

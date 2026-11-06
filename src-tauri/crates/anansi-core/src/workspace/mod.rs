@@ -34,6 +34,15 @@ pub struct SavedRequest {
     pub bearer: Option<BearerOutcome>,
 }
 
+/// Resultado de mover um request: o novo caminho e se o nome do arquivo mudou
+/// por já existir outro igual no destino.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovedRequest {
+    pub path: String,
+    pub renamed: bool,
+}
+
 /// Workspace aberto. Todos os caminhos recebidos são relativos à raiz, com `/`.
 #[derive(Debug, Clone)]
 pub struct Workspace {
@@ -467,12 +476,74 @@ impl Workspace {
             .path)
     }
 
+    /// Move o request (o `.json` e os arquivos de body) para outra pasta do workspace,
+    /// sem ler nem regravar o conteúdo. Se o nome do arquivo já existir no destino,
+    /// ganha o sufixo `-2`, `-3`…
+    pub fn request_move(&self, rel: &str, target_parent: &str) -> AppResult<MovedRequest> {
+        let (dir, stem) = self.request_location(rel)?;
+        let main = dir.join(format!("{stem}.json"));
+        if !main.is_file() {
+            return Err(AppError::not_found(rel));
+        }
+        let target_dir = self.container_dir(target_parent)?;
+        if same_dir(&dir, &target_dir) {
+            return Err(AppError::InvalidRequest(
+                "O request já está nessa pasta.".into(),
+            ));
+        }
+        let new_stem = unique_name(&existing_names(&target_dir), &stem, ".json", &BODY_SUFFIXES);
+        let new_rel = join_rel(target_parent, &format!("{new_stem}.json"));
+        check_length(&new_rel)?;
+        // O `.json` vai por último: é ele que faz o request aparecer na árvore.
+        let moves: Vec<(PathBuf, PathBuf)> = BODY_SUFFIXES
+            .iter()
+            .chain(std::iter::once(&".json"))
+            .map(|suffix| {
+                (
+                    dir.join(format!("{stem}{suffix}")),
+                    target_dir.join(format!("{new_stem}{suffix}")),
+                )
+            })
+            .filter(|(from, _)| from.is_file())
+            .collect();
+        move_all(&moves, fs_ops::rename_with_retry)?;
+        Ok(MovedRequest {
+            path: new_rel,
+            renamed: new_stem != stem,
+        })
+    }
+
     fn validated(request: &RequestFile) -> AppResult<RequestFile> {
         let mut request = request.clone();
         request.name = clean_name(&request.name)?;
         request.schema_version = REQUEST_SCHEMA_VERSION;
         Ok(request)
     }
+}
+
+/// `true` se os dois caminhos apontam para o mesmo diretório (no Windows, sem diferenciar maiúsculas).
+fn same_dir(a: &Path, b: &Path) -> bool {
+    match (dunce::canonicalize(a), dunce::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// Faz os renames em ordem. Se um falhar, desfaz os anteriores (em ordem inversa)
+/// e devolve o erro: os arquivos nunca ficam divididos entre origem e destino.
+fn move_all(
+    moves: &[(PathBuf, PathBuf)],
+    mut rename: impl FnMut(&Path, &Path) -> AppResult<()>,
+) -> AppResult<()> {
+    for (i, (from, to)) in moves.iter().enumerate() {
+        if let Err(err) = rename(from, to) {
+            for (done_from, done_to) in moves[..i].iter().rev() {
+                let _ = rename(done_to, done_from);
+            }
+            return Err(err);
+        }
+    }
+    Ok(())
 }
 
 fn own_file_names(stem: &str) -> Vec<String> {
@@ -508,4 +579,63 @@ fn canonical_dir(path: &Path) -> AppResult<PathBuf> {
         )));
     }
     Ok(root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pairs() -> Vec<(PathBuf, PathBuf)> {
+        vec![
+            (
+                PathBuf::from("a/x.body.json"),
+                PathBuf::from("b/x.body.json"),
+            ),
+            (PathBuf::from("a/x.json"), PathBuf::from("b/x.json")),
+        ]
+    }
+
+    #[test]
+    fn move_all_undoes_previous_renames_when_one_fails() {
+        let mut calls: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let err = move_all(&pairs(), |from, to| {
+            calls.push((from.to_path_buf(), to.to_path_buf()));
+            if from.ends_with("x.json") {
+                Err(AppError::IoError("em uso".into()))
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert_eq!(err.code(), "IO_ERROR");
+        assert_eq!(
+            calls,
+            vec![
+                (
+                    PathBuf::from("a/x.body.json"),
+                    PathBuf::from("b/x.body.json")
+                ),
+                (PathBuf::from("a/x.json"), PathBuf::from("b/x.json")),
+                (
+                    PathBuf::from("b/x.body.json"),
+                    PathBuf::from("a/x.body.json")
+                ),
+            ],
+            "o body volta para a origem"
+        );
+    }
+
+    #[test]
+    fn move_all_renames_in_order() {
+        let mut calls = Vec::new();
+        move_all(&pairs(), |from, _| {
+            calls.push(from.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            calls,
+            vec![PathBuf::from("a/x.body.json"), PathBuf::from("a/x.json")]
+        );
+    }
 }
