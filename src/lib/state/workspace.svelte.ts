@@ -5,7 +5,7 @@ import { collectionApi, folderApi, workspaceApi } from '../api/workspace';
 import { requestApi } from '../api/requests';
 import { bearerEvents, withBearerEnvironment } from '../bearer';
 import { envApi } from '../api/environments';
-import { filterTree, parentPath } from '../tree';
+import { filterTree, findNode, parentPath, selfAndAncestors, type ContainerOption } from '../tree';
 import { errorMessage, isAppError, type TreeNode, type WorkspaceInfo } from '../types';
 import { dialogs, toasts } from './dialogs.svelte';
 import { environments } from './environments.svelte';
@@ -203,6 +203,24 @@ class WorkspaceState {
       await this.refresh();
       this.selected = copy;
       await tabs.openRequest(copy);
+    });
+  }
+
+  /** "Mover para…": move o request e mostra onde ele foi parar. */
+  async move(path: string, target: ContainerOption) {
+    await this.run(async () => {
+      const name = findNode(this.tree, path)?.name ?? path;
+      const result = await requestApi.move(path, target.path);
+      tabs.onPathMoved(path, result.path);
+      for (const p of selfAndAncestors(target.path)) this.expand(p);
+      await this.refresh();
+      this.selected = result.path;
+      const file = result.path.slice(result.path.lastIndexOf('/') + 1);
+      toasts.show(
+        result.renamed
+          ? `Request "${name}" movido para ${target.label} como ${file}, porque já havia um arquivo com esse nome.`
+          : `Request "${name}" movido para ${target.label}.`,
+      );
     });
   }
 

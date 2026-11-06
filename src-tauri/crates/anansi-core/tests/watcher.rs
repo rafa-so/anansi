@@ -143,3 +143,30 @@ fn gitignore_change_reports_status() {
     }
     assert_eq!(status, Some(false));
 }
+
+/// Mover request (docs/mover-request, RNF-03): não gera aviso de mudança externa.
+#[test]
+fn moving_request_is_not_an_external_change() {
+    let (_tmp, root) = common::empty_dir();
+    let ws = Workspace::init(&root).unwrap();
+    ws.collection_create("C", None).unwrap();
+    ws.folder_create("c", "p").unwrap();
+    let mut req = request("X");
+    req.body = Body::Text {
+        content: "oi".into(),
+    };
+    let rel = ws.request_create("c", &req).unwrap();
+    std::thread::sleep(Duration::from_millis(1600));
+
+    let sink = Arc::new(MemorySink::default());
+    let _watcher = WorkspaceWatcher::start(&root, sink.clone()).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    ws.request_move(&rel, "c/p").unwrap();
+    // Só os caminhos da collection: no Windows o watcher às vezes reporta a pasta
+    // `environments` sem motivo (também acontece em `own_writes_and_git_folder_are_ignored`).
+    let paths: Vec<String> = changed_paths(&sink, Duration::from_secs(2))
+        .into_iter()
+        .filter(|p| p == "c" || p.starts_with("c/"))
+        .collect();
+    assert!(paths.is_empty(), "{paths:?}");
+}

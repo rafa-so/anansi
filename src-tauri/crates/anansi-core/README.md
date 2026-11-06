@@ -2,7 +2,7 @@
 
 ## Introdução
 
-Toda a lógica do `anansi`: leitura e escrita do workspace (collections, pastas, requests e bodies), slugs, validação de caminhos, ambientes e segredos, resolução de `{{variáveis}}`, execução HTTP, cURL (exportar e importar), file watcher e pull/push do git (chama o `git` instalado na máquina, para usar as credenciais do usuário). O token Bearer nunca vai para o git: `env::bearer` o guarda no segredo `bearer_token` do ambiente ao salvar, `git::push` recusa arquivos com token em texto puro e `git::hooks` instala um `pre-commit` que protege os commits feitos fora do app. Não depende do Tauri: o crate do app (`src-tauri/src`) só converte os comandos do frontend em chamadas daqui.
+Toda a lógica do `anansi`: leitura e escrita do workspace (collections, pastas, requests e bodies, inclusive mover um request entre pastas com `Workspace::request_move`), slugs, validação de caminhos, ambientes e segredos, resolução de `{{variáveis}}`, execução HTTP, cURL (exportar e importar), file watcher e pull/push do git (chama o `git` instalado na máquina, para usar as credenciais do usuário). O token Bearer nunca vai para o git: `env::bearer` o guarda no segredo `bearer_token` do ambiente ao salvar, `git::push` recusa arquivos com token em texto puro e `git::hooks` instala um `pre-commit` que protege os commits feitos fora do app. Não depende do Tauri: o crate do app (`src-tauri/src`) só converte os comandos do frontend em chamadas daqui.
 
 ## Dependências
 

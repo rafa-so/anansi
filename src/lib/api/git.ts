@@ -1,5 +1,5 @@
 // Pull e push do repositório do workspace.
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './ipc';
 import type { BearerOutcome, GitPullResult, GitPushResult, GitStatus } from '../types';
 
 export const gitApi = {

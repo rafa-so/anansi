@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use anansi_core::env::{bearer, SecretAction};
 use anansi_core::model::RequestFile;
-use anansi_core::workspace::SavedRequest;
+use anansi_core::workspace::{MovedRequest, SavedRequest};
 use anansi_core::AppResult;
 use serde::Serialize;
 use tauri::State;
@@ -58,6 +58,17 @@ pub async fn request_duplicate(
         .workspace()?
         .request_duplicate(&path, env.as_deref())?;
     Ok(PathResult { path })
+}
+
+/// Move o request para outra pasta do workspace (docs/mover-request).
+/// `renamed` indica que o nome do arquivo ganhou sufixo por conflito no destino.
+#[tauri::command]
+pub async fn request_move(
+    state: State<'_, AppState>,
+    path: String,
+    target_parent: String,
+) -> AppResult<MovedRequest> {
+    state.workspace()?.request_move(&path, &target_parent)
 }
 
 /// Prévia do "Importar cURL": o que acontece com o segredo `bearer_token`

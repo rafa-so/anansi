@@ -2,9 +2,9 @@
 
 mod common;
 
-use common::*;
 use anansi_core::model::TreeNode;
 use anansi_core::Workspace;
+use common::*;
 use pretty_assertions::assert_eq;
 
 /// Resumo legível da árvore: uma linha por nó, com indentação.

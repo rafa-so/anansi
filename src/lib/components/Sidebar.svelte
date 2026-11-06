@@ -48,6 +48,11 @@
     return [
       { label: 'Abrir', action: () => tabs.openRequest(node.path), testid: 'menu-open' },
       { label: 'Duplicar', action: () => workspace.duplicate(node.path), testid: 'menu-duplicate' },
+      {
+        label: 'Mover para…',
+        action: () => (ui.moveRequest = { path: node.path, name: node.name }),
+        testid: 'menu-move',
+      },
       { label: 'Renomear', action: () => workspace.rename(node), testid: 'menu-rename' },
       'separator',
       ...curlMenuItems(() => tabs.tabs.find((t) => t.path === node.path)?.draft ?? requestApi.get(node.path)),

@@ -101,7 +101,9 @@ fn renames_collection_and_folder() {
             .path(),
         "cliente-api"
     );
-    let folder = ws.folder_rename("cliente-api/products", "Produtos").unwrap();
+    let folder = ws
+        .folder_rename("cliente-api/products", "Produtos")
+        .unwrap();
     assert_eq!(folder.path(), "cliente-api/produtos");
     assert_eq!(
         ws.folder_rename("cliente-api/produtos", "PRODUTOS")
@@ -434,4 +436,147 @@ fn rejects_too_long_paths() {
         .unwrap_err();
     assert_eq!(err.code(), "INVALID_NAME");
     assert!(err.to_string().contains("muito longo"));
+}
+
+// ----- mover request (docs/mover-request) -----
+
+fn store_with_folders() -> (TempDir, PathBuf, Workspace) {
+    let (tmp, root, ws) = new_workspace();
+    ws.collection_create("Store API", None).unwrap();
+    ws.collection_create("Billing API", None).unwrap();
+    ws.folder_create("store-api", "products").unwrap();
+    ws.folder_create("store-api/products", "reviews").unwrap();
+    (tmp, root, ws)
+}
+
+/// RF-06: move o `.json` sem alterar o conteúdo.
+#[test]
+fn moves_request_without_body() {
+    let (_tmp, root, ws) = store_with_folders();
+    let rel = ws.request_create("store-api", &request("Listar")).unwrap();
+    let before = read(&root, &rel);
+    let moved = ws.request_move(&rel, "store-api/products/reviews").unwrap();
+    assert_eq!(moved.path, "store-api/products/reviews/listar.json");
+    assert!(!moved.renamed);
+    assert!(!exists(&root, &rel));
+    assert_eq!(read(&root, &moved.path), before, "conteúdo idêntico");
+}
+
+/// RF-06: o arquivo de body vai junto, seja `.body.json` ou `.body.txt`.
+#[test]
+fn moves_request_with_body_files() {
+    let (_tmp, root, ws) = store_with_folders();
+    let mut json = request("Criar");
+    json.body = Body::Json {
+        content: "{\"a\": 1}".into(),
+    };
+    let mut text = request("Texto");
+    text.body = Body::Text {
+        content: "oi".into(),
+    };
+    let json_rel = ws.request_create("store-api", &json).unwrap();
+    let text_rel = ws.request_create("store-api", &text).unwrap();
+
+    let moved = ws.request_move(&json_rel, "store-api/products").unwrap();
+    assert_eq!(moved.path, "store-api/products/criar.json");
+    assert_eq!(
+        read(&root, "store-api/products/criar.body.json"),
+        "{\"a\": 1}"
+    );
+    assert!(!exists(&root, "store-api/criar.body.json"));
+
+    let moved = ws.request_move(&text_rel, "store-api/products").unwrap();
+    assert_eq!(read(&root, "store-api/products/texto.body.txt"), "oi");
+    assert!(!exists(&root, "store-api/texto.body.txt"));
+    assert_eq!(ws.request_get(&moved.path).unwrap(), {
+        let mut t = text.clone();
+        t.schema_version = 1;
+        t
+    });
+}
+
+/// RF-10: mover entre collections do mesmo workspace é permitido.
+#[test]
+fn moves_request_between_collections() {
+    let (_tmp, root, ws) = store_with_folders();
+    let rel = ws
+        .request_create("store-api/products", &request("Listar"))
+        .unwrap();
+    let moved = ws.request_move(&rel, "billing-api").unwrap();
+    assert_eq!(moved.path, "billing-api/listar.json");
+    assert!(exists(&root, "billing-api/listar.json"));
+}
+
+/// RF-07 / D-08: nome de arquivo já usado no destino ganha sufixo; o `name` do JSON não muda.
+#[test]
+fn moving_onto_existing_name_gets_suffix() {
+    let (_tmp, _root, ws) = store_with_folders();
+    ws.request_create("billing-api", &request("Listar"))
+        .unwrap();
+    let rel = ws.request_create("store-api", &request("Listar")).unwrap();
+    let moved = ws.request_move(&rel, "billing-api").unwrap();
+    assert_eq!(moved.path, "billing-api/listar-2.json");
+    assert!(moved.renamed);
+    assert_eq!(ws.request_get(&moved.path).unwrap().name, "Listar");
+}
+
+/// D-08: um arquivo de body sozinho no destino também ocupa o nome.
+#[test]
+fn moving_onto_existing_body_file_gets_suffix() {
+    let (_tmp, root, ws) = store_with_folders();
+    std::fs::write(root.join("billing-api/listar.body.txt"), "x").unwrap();
+    let rel = ws.request_create("store-api", &request("Listar")).unwrap();
+    let moved = ws.request_move(&rel, "billing-api").unwrap();
+    assert_eq!(moved.path, "billing-api/listar-2.json");
+    assert_eq!(read(&root, "billing-api/listar.body.txt"), "x");
+}
+
+/// D-09: request com JSON inválido também pode ser movido, como está.
+#[test]
+fn moves_broken_request_as_is() {
+    let (_tmp, root, ws) = store_with_folders();
+    std::fs::write(root.join("store-api/quebrado.json"), "{ nao e json").unwrap();
+    let moved = ws
+        .request_move("store-api/quebrado.json", "store-api/products")
+        .unwrap();
+    assert_eq!(read(&root, &moved.path), "{ nao e json");
+}
+
+#[test]
+fn move_rejects_invalid_origin_and_target() {
+    let (_tmp, _root, ws) = store_with_folders();
+    let rel = ws.request_create("store-api", &request("Listar")).unwrap();
+    assert_eq!(
+        ws.request_move(&rel, "store-api").unwrap_err().code(),
+        "INVALID_REQUEST",
+        "destino igual à origem"
+    );
+    assert_eq!(
+        ws.request_move("store-api/nao-existe.json", "billing-api")
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND"
+    );
+    assert_eq!(
+        ws.request_move(&rel, "store-api/nao-existe")
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND"
+    );
+    assert_eq!(
+        ws.request_move(&rel, "environments").unwrap_err().code(),
+        "NOT_FOUND",
+        "environments não é collection"
+    );
+    assert_eq!(
+        ws.request_move(&rel, "store-api/../..").unwrap_err().code(),
+        "PATH_OUTSIDE_WORKSPACE"
+    );
+    assert_eq!(
+        ws.request_move(&rel, "store-api/listar.json")
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND",
+        "request não recebe filhos"
+    );
 }

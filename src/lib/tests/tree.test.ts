@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { countRequests, filterTree, findNode, fold, isSameOrInside, movePath, parentPath } from '../tree';
+import {
+  countRequests,
+  filterTree,
+  findNode,
+  fold,
+  isSameOrInside,
+  listContainers,
+  movePath,
+  parentPath,
+  selfAndAncestors,
+} from '../tree';
 import type { TreeNode } from '../types';
 
 const tree: TreeNode[] = [
@@ -82,5 +92,48 @@ describe('caminhos', () => {
 
   it('remove acentos ao normalizar', () => {
     expect(fold('AÇÃO')).toBe('acao');
+  });
+});
+
+describe('listContainers', () => {
+  it('lista collections e pastas em ordem de árvore, com o caminho exibido', () => {
+    expect(listContainers(tree)).toEqual([
+      { path: 'store-api', label: 'Store API' },
+      { path: 'store-api/products', label: 'Store API / products' },
+      { path: 'billing-api', label: 'Billing API' },
+    ]);
+  });
+
+  it('inclui pastas em qualquer profundidade e nunca requests', () => {
+    const deep: TreeNode[] = [
+      {
+        kind: 'collection',
+        path: 'c',
+        name: 'C',
+        children: [
+          {
+            kind: 'folder',
+            path: 'c/a',
+            name: 'a',
+            children: [
+              { kind: 'folder', path: 'c/a/b', name: 'b', children: [] },
+              { kind: 'request', path: 'c/a/r.json', name: 'R', method: 'GET', url: '' },
+            ],
+          },
+        ],
+      },
+    ];
+    expect(listContainers(deep).map((o) => o.label)).toEqual(['C', 'C / a', 'C / a / b']);
+  });
+
+  it('árvore vazia não tem destinos', () => {
+    expect(listContainers([])).toEqual([]);
+  });
+});
+
+describe('selfAndAncestors', () => {
+  it('devolve o caminho e todos os acima dele, do topo para baixo', () => {
+    expect(selfAndAncestors('a/b/c')).toEqual(['a', 'a/b', 'a/b/c']);
+    expect(selfAndAncestors('a')).toEqual(['a']);
   });
 });

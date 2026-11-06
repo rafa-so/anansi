@@ -1,5 +1,5 @@
-import { invoke } from '@tauri-apps/api/core';
-import type { RequestFile, SavedRequest, SecretAction } from '../types';
+import { invoke } from './ipc';
+import type { MovedRequest, RequestFile, SavedRequest, SecretAction } from '../types';
 
 export const requestApi = {
   get: (path: string) => invoke<RequestFile>('request_get', { path }),
@@ -11,6 +11,8 @@ export const requestApi = {
   remove: (path: string) => invoke<void>('request_delete', { path }),
   duplicate: (path: string, env: string | null) =>
     invoke<{ path: string }>('request_duplicate', { path, env }),
+  /** Move o request para outra pasta do workspace. */
+  move: (path: string, targetParent: string) => invoke<MovedRequest>('request_move', { path, targetParent }),
   /** Prévia do import: `null` se não há token literal. */
   bearerPreview: (request: RequestFile, env: string | null) =>
     invoke<SecretAction | null>('bearer_preview', { request, env }),

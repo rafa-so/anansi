@@ -33,6 +33,13 @@ npm run tauri dev      # abre o app com hot reload
 
 A primeira compilação do Rust demora alguns minutos; as seguintes são incrementais.
 
+### Debug
+
+- **DevTools:** com o app aberto pelo `npm run tauri dev`, use `Ctrl+Shift+I` (ou botão direito → Inspecionar fora da árvore) para abrir o DevTools do WebView2. A aba Console mostra os logs abaixo; a aba Sources permite pôr breakpoints nos `.svelte`/`.ts` (há source maps).
+- **Log de IPC:** no `tauri dev`, cada chamada ao backend aparece no console como `[ipc] request_move ✓ 12ms`, com argumentos e resultado, ou `[ipc] request_move ✗` com o erro. Para desligar, rode no console `localStorage['anansi:debug-ipc'] = '0'`; para ligar num build de release, `= '1'` (remova a chave para voltar ao padrão).
+- **Erros não tratados:** exceções e promises rejeitadas sem `catch` viram um toast "Erro inesperado: …" e são logadas como `[anansi] erro não tratado`, em vez de sumir em silêncio.
+- **Backend (Rust):** `eprintln!`/`dbg!` nos comandos aparecem no terminal onde o `tauri dev` está rodando. Para depurar a lógica de `anansi-core` sem abrir o app, rode o teste específico: `cargo test --manifest-path src-tauri/Cargo.toml -p anansi-core moves_request -- --nocapture`.
+
 ## Testes
 
 | Comando             | O que roda                                                                                                                         |
@@ -72,7 +79,7 @@ A versão fica em `src-tauri/tauri.conf.json` e no `package.json`; atualize as d
 ## Uso básico
 
 1. Abra a pasta do `minhas-collections` (na primeira vez, o app oferece inicializar o workspace).
-2. "+ Collection" cria uma collection; o botão direito na árvore cria pastas e requests, renomeia, duplica, copia como cURL e remove.
+2. "+ Collection" cria uma collection; o botão direito na árvore cria pastas e requests, renomeia, duplica, move, copia como cURL e remove. **Mover para…** (no menu de um request) lista todas as collections e pastas do workspace, com busca, e move o request (e o arquivo de body, se houver) para a pasta escolhida; se já existir um arquivo com o mesmo nome no destino, o movido ganha o sufixo `-2`.
 3. **Ambientes…** (barra superior) cria os ambientes (`local`, `hml`, `prd`). Variáveis vão para `environments/<ambiente>.json` (versionado); segredos, como tokens e chaves de API, vão para `environments/<ambiente>.secrets.json`, que fica só na sua máquina. Escolha o ambiente ativo no seletor ao lado.
 4. Use `{{nome}}` na URL, nos params, nos headers e no body. Nomes que não existem no ambiente ativo (ou segredos vazios) ficam em vermelho, e o app avisa antes de enviar. Ao passar o mouse (ou focar) num campo com `{{nome}}`, um tooltip mostra o valor: variáveis por inteiro, segredos mascarados (`eyJh••••••a9Fz`) com **Mostrar** e **Copiar**, e nomes não definidos com **Definir**, que abre Ambientes.
 5. **Bearer Token:** o token nunca vai para o git. Ao salvar um request (ou importar um cURL) com `Authorization: Bearer <token>`, o token vai para o segredo `bearer_token` do ambiente ativo e o arquivo do request fica com `Bearer {{bearer_token}}`. Todos os requests com essa referência usam o mesmo token, e cada ambiente (`local`, `hml`, `prd`) tem o seu. Sem ambiente ativo, o app pergunta onde guardar (ou cria o `local`). Todo ambiente novo já nasce com o segredo `bearer_token` vazio. Se o `.gitignore` não protege os segredos, ele é corrigido sozinho, com aviso.
